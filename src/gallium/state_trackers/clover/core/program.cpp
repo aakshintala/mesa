@@ -55,7 +55,8 @@ program::build(const ref_vector<device> &devs, const char *opts,
          std::string log;
 
          try {
-            auto module = (dev.ir_format() == PIPE_SHADER_IR_TGSI ?
+            auto module = ((_source.compare(0, 7, "main 0 ") == 0 &&
+                            _source.find("COMP\n") != std::string::npos) ?
                            compile_program_tgsi(_source, log) :
                            compile_program_llvm(_source, headers,
                                                 dev.ir_format(),

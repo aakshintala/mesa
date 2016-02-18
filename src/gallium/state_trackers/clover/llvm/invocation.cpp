@@ -34,6 +34,7 @@
 #include <llvm/Bitcode/BitstreamWriter.h>
 #include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/Linker/Linker.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DiagnosticInfo.h>
 #include <llvm/IR/DiagnosticPrinter.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -70,6 +71,8 @@
 #include <llvm-c/Core.h>
 
 #include "pipe/p_state.h"
+#include "tgsi/tgsi_parse.h"
+#include "tgsi/tgsi_text.h"
 #include "util/u_memory.h"
 #include "util/u_math.h"
 
@@ -405,6 +408,19 @@ namespace {
       return res;
    }
 
+   unsigned
+   get_kernel_metadata_int(const llvm::Function *kernel_func,
+                           llvm::StringRef name) {
+      const llvm::MDNode *md_node;
+
+      md_node = kernel_func->getMetadata(name);
+      assert(md_node);
+
+      llvm::ConstantInt *val = llvm::mdconst::dyn_extract<llvm::ConstantInt>(
+                                  md_node->getOperand(0));
+      return val->getZExtValue();
+   }
+
 #elif HAVE_LLVM >= 0x0306
 
    const llvm::MDNode *
@@ -737,6 +753,50 @@ namespace {
       return code;
    }
 
+   std::string
+   compile_tgsi(const llvm::Module *mod, const std::string &triple,
+                const std::string &processor, unsigned dump_tgsi,
+                std::string &r_log) {
+
+      std::string log;
+      LLVMTargetRef target;
+      char *error_message;
+      LLVMMemoryBufferRef out_buffer;
+      unsigned buffer_size;
+      const char *buffer_data;
+      LLVMModuleRef mod_ref = wrap(mod);
+
+      if (LLVMGetTargetFromTriple(triple.c_str(), &target, &error_message)) {
+         r_log = std::string(error_message);
+         LLVMDisposeMessage(error_message);
+         throw compile_error();
+      }
+
+      LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
+            target, triple.c_str(), processor.c_str(), "",
+            LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+
+      if (!tm) {
+         r_log = "Could not create TargetMachine: " + triple;
+         throw compile_error();
+      }
+
+      emit_code(tm, mod_ref, LLVMAssemblyFile, &out_buffer, r_log);
+
+      buffer_size = LLVMGetBufferSize(out_buffer);
+      buffer_data = LLVMGetBufferStart(out_buffer);
+      
+      std::string tgsi_source = std::string(buffer_data, buffer_size);
+
+      LLVMDisposeMemoryBuffer(out_buffer);
+      LLVMDisposeTargetMachine(tm);
+
+      if (dump_tgsi)
+         debug_log(tgsi_source, ".tgsi");
+
+      return tgsi_source;
+   }
+
    std::map<std::string, unsigned>
    get_kernel_offsets(std::vector<char> &code,
                       const std::vector<llvm::Function *> &kernels,
@@ -835,6 +895,37 @@ namespace {
       return m;
    }
 
+   module
+   build_module_tgsi(std::string &tgsi_source,
+                     llvm::Module *mod,
+                     const clang::LangAS::Map &address_spaces,
+                     std::string &r_log) {
+      module m;
+
+      const std::vector<llvm::Function *> kernels = find_kernels(mod);
+      for (unsigned i = 0; i < kernels.size(); ++i) {
+         std::string kernel_name = kernels[i]->getName();
+         unsigned offset =
+               get_kernel_metadata_int(kernels[i], "tgsi_kernel_start");
+         std::vector<module::argument> args =
+               get_kernel_args(mod, kernel_name, address_spaces);
+         m.syms.push_back(module::symbol(kernel_name, 0, offset, args ));
+      }
+
+      tgsi_token prog[1024];
+
+      if (!tgsi_text_translate(tgsi_source.c_str(), prog, ARRAY_SIZE(prog))) {
+         r_log = "translate failed";
+         throw compile_error();
+      }
+
+      unsigned sz = tgsi_num_tokens(prog) * sizeof(tgsi_token);
+      std::vector<char> data( (char *)prog, (char *)prog + sz );
+      m.secs.push_back({ 0, module::section::text, sz, data });
+
+      return m;
+   }
+
    void
    diagnostic_handler(const llvm::DiagnosticInfo &di, void *data) {
       if (di.getSeverity() == llvm::DS_Error) {
@@ -864,6 +955,7 @@ namespace {
 #define DBG_CLC  (1 << 0)
 #define DBG_LLVM (1 << 1)
 #define DBG_ASM  (1 << 2)
+#define DBG_TGSI (1 << 3)
 
    unsigned
    get_debug_flags() {
@@ -872,6 +964,8 @@ namespace {
          {"llvm", DBG_LLVM, "Dump the generated LLVM IR for all kernels."},
          {"asm", DBG_ASM, "Dump kernel assembly code for targets specifying "
           "PIPE_SHADER_IR_NATIVE"},
+         {"tgsi", DBG_TGSI, "Dump kernel tgsi code for targets specifying "
+          "PIPE_SHADER_IR_TGSI"},
          DEBUG_NAMED_VALUE_END // must be last
       };
       static const unsigned debug_flags =
@@ -925,11 +1019,17 @@ clover::compile_program_llvm(const std::string &source,
    // Build the clover::module
    switch (ir) {
       case PIPE_SHADER_IR_NIR:
-      case PIPE_SHADER_IR_TGSI:
-         //XXX: Handle TGSI, NIR
+         //XXX: Handle NIR
          assert(0);
          m = module();
          break;
+      case PIPE_SHADER_IR_TGSI: {
+         std::string tgsi_source = compile_tgsi(mod, triple, processor,
+                                                get_debug_flags() & DBG_TGSI,
+                                                r_log);
+         m = build_module_tgsi(tgsi_source, mod, address_spaces, r_log);
+         break;
+      }
       case PIPE_SHADER_IR_LLVM:
          m = build_module_llvm(mod, address_spaces);
          break;

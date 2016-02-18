@@ -472,6 +472,12 @@ nvc0_screen_get_compute_param(struct pipe_screen *pscreen,
       RET((uint32_t []) { screen->mp_count_compute });
    case PIPE_COMPUTE_CAP_MAX_CLOCK_FREQUENCY:
       RET((uint32_t []) { 512 }); /* FIXME: arbitrary limit */
+   case PIPE_COMPUTE_CAP_IR_TARGET: {
+      const char *tripple = "-tgsi--";
+      if (data)
+          sprintf(data, "%s", tripple);
+      return strlen(tripple) + 1;
+   }
    default:
       return 0;
    }
