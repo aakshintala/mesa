@@ -65,6 +65,7 @@ program::build(const ref_vector<device> &devs, const char *opts,
             _binaries.insert({ &dev, module });
             _logs.insert({ &dev, log });
          } catch (const error &) {
+            printf("program::build error: %s\n", log.c_str());
             _logs.insert({ &dev, log });
             throw;
          }
