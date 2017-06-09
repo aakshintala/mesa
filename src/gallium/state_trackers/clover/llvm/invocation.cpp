@@ -149,8 +149,13 @@ namespace {
       clang::EmitLLVMOnlyAction act(&llvm_ctx);
       std::string log;
       llvm::raw_string_ostream s_log(log);
-      std::string libclc_path = LIBCLC_LIBEXECDIR + processor + "-"
-                                                  + triple + ".bc";
+      std::string target_string;
+      if(triple == "tgsi--") {
+         target_string = triple+".bc";
+      } else {
+         target_string = processor + "-" + triple + ".bc";
+      }
+      std::string libclc_path = LIBCLC_LIBEXECDIR + target_string;
 
       // Parse the compiler options:
       std::vector<std::string> opts_array;
@@ -998,6 +1003,11 @@ clover::compile_program_llvm(const std::string &source,
 
    if (get_debug_flags() & DBG_CLC)
       debug_log("// Build options: " + opts + '\n' + source, ".cl");
+ 
+   if(processor == "tgsi") {
+      processor = "";
+      triple = "tgsi--";
+   }
 
    // The input file name must have the .cl extension in order for the
    // CompilerInvocation class to recognize it as an OpenCL source file.
