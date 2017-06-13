@@ -60,6 +60,12 @@ nouveau_screen_get_timestamp(struct pipe_screen *pscreen)
    return cpu_time + nouveau_screen(pscreen)->cpu_gpu_time_delta;
 }
 
+static struct disk_cache *
+nouveau_screen_get_disk_shader_cache(struct pipe_screen *pscreen)
+{
+   return nouveau_screen(pscreen)->disk_shader_cache;
+}
+
 static void
 nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
@@ -70,6 +76,7 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
 
 static boolean
 nouveau_screen_fence_finish(struct pipe_screen *screen,
+                            struct pipe_context *ctx,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
@@ -135,6 +142,25 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
       return nouveau_bo_set_prime(bo, (int *)&whandle->handle) == 0;
    } else {
       return false;
+   }
+}
+
+static void
+nouveau_disk_cache_create(struct nouveau_screen *screen)
+{
+   uint32_t mesa_timestamp;
+   char *timestamp_str;
+   int res;
+
+   if (disk_cache_get_function_timestamp(nouveau_disk_cache_create,
+                                         &mesa_timestamp)) {
+      res = asprintf(&timestamp_str, "%u", mesa_timestamp);
+      if (res != -1) {
+         screen->disk_shader_cache =
+            disk_cache_create(nouveau_screen_get_name(&screen->base),
+                              timestamp_str, 0);
+         free(timestamp_str);
+      }
    }
 }
 
@@ -207,11 +233,14 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
    pscreen->get_name = nouveau_screen_get_name;
    pscreen->get_vendor = nouveau_screen_get_vendor;
    pscreen->get_device_vendor = nouveau_screen_get_device_vendor;
+   pscreen->get_disk_shader_cache = nouveau_screen_get_disk_shader_cache;
 
    pscreen->get_timestamp = nouveau_screen_get_timestamp;
 
    pscreen->fence_reference = nouveau_screen_fence_ref;
    pscreen->fence_finish = nouveau_screen_fence_finish;
+
+   nouveau_disk_cache_create(screen);
 
    util_format_s3tc_init();
 
@@ -253,6 +282,8 @@ nouveau_screen_fini(struct nouveau_screen *screen)
    nouveau_device_del(&screen->device);
    nouveau_drm_del(&screen->drm);
    close(fd);
+
+   disk_cache_destroy(screen->disk_shader_cache);
 }
 
 static void

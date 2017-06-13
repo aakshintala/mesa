@@ -135,7 +135,7 @@ static void vbo_bind_vertex_list(struct gl_context *ctx,
 {
    struct vbo_context *vbo = vbo_context(ctx);
    struct vbo_save_context *save = &vbo->save;
-   struct gl_client_array *arrays = save->arrays;
+   struct gl_vertex_array *arrays = save->arrays;
    GLuint buffer_offset = node->buffer_offset;
    const GLuint *map;
    GLuint attr;
@@ -174,8 +174,10 @@ static void vbo_bind_vertex_list(struct gl_context *ctx,
        * In that case we effectively need to route the data from
        * glVertexAttrib(0, val) calls to feed into the GENERIC0 input.
        */
-      if ((ctx->VertexProgram._Current->Base.InputsRead & VERT_BIT_POS) == 0 &&
-          (ctx->VertexProgram._Current->Base.InputsRead & VERT_BIT_GENERIC0)) {
+      if ((ctx->VertexProgram._Current->info.inputs_read &
+           VERT_BIT_POS) == 0 &&
+          (ctx->VertexProgram._Current->info.inputs_read &
+           VERT_BIT_GENERIC0)) {
          save->inputs[VERT_ATTRIB_GENERIC0] = save->inputs[0];
          node_attrsz[VERT_ATTRIB_GENERIC0] = node_attrsz[0];
          node_attrtype[VERT_ATTRIB_GENERIC0] = node_attrtype[0];
@@ -196,12 +198,10 @@ static void vbo_bind_vertex_list(struct gl_context *ctx,
 	 arrays[attr].Ptr = (const GLubyte *) NULL + buffer_offset;
 	 arrays[attr].Size = node_attrsz[src];
 	 arrays[attr].StrideB = node->vertex_size * sizeof(GLfloat);
-	 arrays[attr].Stride = node->vertex_size * sizeof(GLfloat);
          arrays[attr].Type = node_attrtype[src];
          arrays[attr].Integer =
                vbo_attrtype_to_integer_flag(node_attrtype[src]);
          arrays[attr].Format = GL_RGBA;
-	 arrays[attr].Enabled = 1;
          arrays[attr]._ElementSize = arrays[attr].Size * sizeof(GLfloat);
          _mesa_reference_buffer_object(ctx,
                                        &arrays[attr].BufferObj,

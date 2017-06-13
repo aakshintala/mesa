@@ -25,9 +25,12 @@
  *
  */
 
+#ifndef _VTN_PRIVATE_H_
+#define _VTN_PRIVATE_H_
+
 #include "nir/nir.h"
 #include "nir/nir_builder.h"
-#include "nir/nir_array.h"
+#include "util/u_dynarray.h"
 #include "nir_spirv.h"
 #include "spirv.h"
 
@@ -112,7 +115,7 @@ struct vtn_case {
    struct vtn_case *fallthrough;
 
    /* The uint32_t values that map to this case */
-   nir_array values;
+   struct util_dynarray values;
 
    /* True if this is the default case */
    bool is_default;
@@ -149,8 +152,8 @@ struct vtn_block {
    /** Points to the switch case started by this block (if any) */
    struct vtn_case *switch_case;
 
-   /** The last block in this SPIR-V block. */
-   nir_block *end_block;
+   /** Every block ends in a nop intrinsic so that we can find it again */
+   nir_intrinsic_instr *end_nop;
 };
 
 struct vtn_function {
@@ -279,6 +282,8 @@ struct vtn_variable {
 
    unsigned descriptor_set;
    unsigned binding;
+   unsigned input_attachment_index;
+   bool patch;
 
    nir_variable *var;
    nir_variable **members;
@@ -346,6 +351,7 @@ struct vtn_builder {
 
    nir_shader *shader;
    nir_function_impl *impl;
+   const struct nir_spirv_supported_extensions *ext;
    struct vtn_block *block;
 
    /* Current file, line, and column.  Useful for debugging.  Set
@@ -479,10 +485,19 @@ typedef void (*vtn_execution_mode_foreach_cb)(struct vtn_builder *,
 void vtn_foreach_execution_mode(struct vtn_builder *b, struct vtn_value *value,
                                 vtn_execution_mode_foreach_cb cb, void *data);
 
-nir_op vtn_nir_alu_op_for_spirv_opcode(SpvOp opcode, bool *swap);
+nir_op vtn_nir_alu_op_for_spirv_opcode(SpvOp opcode, bool *swap,
+                                       nir_alu_type src, nir_alu_type dst);
 
 void vtn_handle_alu(struct vtn_builder *b, SpvOp opcode,
                     const uint32_t *w, unsigned count);
 
 bool vtn_handle_glsl450_instruction(struct vtn_builder *b, uint32_t ext_opcode,
                                     const uint32_t *words, unsigned count);
+
+static inline uint64_t
+vtn_u64_literal(const uint32_t *w)
+{
+   return (uint64_t)w[1] << 32 | w[0];
+}
+
+#endif /* _VTN_PRIVATE_H_ */

@@ -32,54 +32,17 @@
 #include "util/u_prim.h"
 
 /*
- * Convert mesa PIPE_PRIM_X to SWR enum PRIMITIVE_TOPOLOGY
- */
-static INLINE enum PRIMITIVE_TOPOLOGY
-swr_convert_prim_topology(const unsigned mode)
-{
-   switch (mode) {
-   case PIPE_PRIM_POINTS:
-      return TOP_POINT_LIST;
-   case PIPE_PRIM_LINES:
-      return TOP_LINE_LIST;
-   case PIPE_PRIM_LINE_LOOP:
-      return TOP_LINE_LOOP;
-   case PIPE_PRIM_LINE_STRIP:
-      return TOP_LINE_STRIP;
-   case PIPE_PRIM_TRIANGLES:
-      return TOP_TRIANGLE_LIST;
-   case PIPE_PRIM_TRIANGLE_STRIP:
-      return TOP_TRIANGLE_STRIP;
-   case PIPE_PRIM_TRIANGLE_FAN:
-      return TOP_TRIANGLE_FAN;
-   case PIPE_PRIM_QUADS:
-      return TOP_QUAD_LIST;
-   case PIPE_PRIM_QUAD_STRIP:
-      return TOP_QUAD_STRIP;
-   case PIPE_PRIM_POLYGON:
-      return TOP_TRIANGLE_FAN; /* XXX TOP_POLYGON; */
-   case PIPE_PRIM_LINES_ADJACENCY:
-      return TOP_LINE_LIST_ADJ;
-   case PIPE_PRIM_LINE_STRIP_ADJACENCY:
-      return TOP_LISTSTRIP_ADJ;
-   case PIPE_PRIM_TRIANGLES_ADJACENCY:
-      return TOP_TRI_LIST_ADJ;
-   case PIPE_PRIM_TRIANGLE_STRIP_ADJACENCY:
-      return TOP_TRI_STRIP_ADJ;
-   default:
-      assert(0 && "Unknown topology");
-      return TOP_UNKNOWN;
-   }
-};
-
-
-/*
  * Draw vertex arrays, with optional indexing, optional instancing.
  */
 static void
 swr_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
 {
    struct swr_context *ctx = swr_context(pipe);
+
+   if (!info->count_from_stream_output && !info->indirect &&
+       !info->primitive_restart &&
+       !u_trim_pipe_prim(info->mode, (unsigned*)&info->count))
+      return;
 
    if (!swr_check_render_cond(pipe))
       return;
@@ -90,8 +53,7 @@ swr_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
    }
 
    /* Update derived state, pass draw info to update function */
-   if (ctx->dirty)
-      swr_update_derived(pipe, info);
+   swr_update_derived(pipe, info);
 
    swr_update_draw_context(ctx);
 
@@ -142,19 +104,23 @@ swr_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
    }
 
    struct swr_vertex_element_state *velems = ctx->velems;
-   if (!velems->fsFunc
-       || (velems->fsState.cutIndex != info->restart_index)
-       || (velems->fsState.bEnableCutIndex != info->primitive_restart)) {
+   velems->fsState.cutIndex = info->restart_index;
+   velems->fsState.bEnableCutIndex = info->primitive_restart;
+   velems->fsState.bPartialVertexBuffer = (info->min_index > 0);
 
-      velems->fsState.cutIndex = info->restart_index;
-      velems->fsState.bEnableCutIndex = info->primitive_restart;
-
-      /* Create Fetch Shader */
+   swr_jit_fetch_key key;
+   swr_generate_fetch_key(key, velems);
+   auto search = velems->map.find(key);
+   if (search != velems->map.end()) {
+      velems->fsFunc = search->second;
+   } else {
       HANDLE hJitMgr = swr_screen(ctx->pipe.screen)->hJitMgr;
       velems->fsFunc = JitCompileFetch(hJitMgr, velems->fsState);
 
       debug_printf("fetch shader %p\n", velems->fsFunc);
       assert(velems->fsFunc && "Error: FetchShader = NULL");
+
+      velems->map.insert(std::make_pair(key, velems->fsFunc));
    }
 
    SwrSetFetchFunc(ctx->swrContext, velems->fsFunc);
@@ -168,7 +134,13 @@ swr_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
       feState.provokingVertex = {2, 1, 2};
    }
 
-   switch (info->mode) {
+   enum pipe_prim_type topology;
+   if (ctx->gs)
+      topology = (pipe_prim_type)ctx->gs->info.base.properties[TGSI_PROPERTY_GS_OUTPUT_PRIM];
+   else
+      topology = info->mode;
+
+   switch (topology) {
    case PIPE_PRIM_TRIANGLE_FAN:
       feState.topologyProvokingVertex = feState.provokingVertex.triFan;
       break;
@@ -195,7 +167,7 @@ swr_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
    feState.bEnableCutIndex = info->primitive_restart;
    SwrSetFrontendState(ctx->swrContext, &feState);
 
-   if (info->indexed)
+   if (info->index_size)
       SwrDrawIndexedInstanced(ctx->swrContext,
                               swr_convert_prim_topology(info->mode),
                               info->count,
@@ -239,7 +211,7 @@ swr_finish(struct pipe_context *pipe)
    struct pipe_fence_handle *fence = nullptr;
 
    swr_flush(pipe, &fence, 0);
-   swr_fence_finish(pipe->screen, fence, 0);
+   swr_fence_finish(pipe->screen, NULL, fence, 0);
    swr_fence_reference(pipe->screen, &fence, NULL);
 }
 
@@ -258,37 +230,15 @@ swr_store_render_target(struct pipe_context *pipe,
 
    /* Only proceed if there's a valid surface to store to */
    if (renderTarget->pBaseAddress) {
-      /* Set viewport to full renderTarget width/height and disable scissor
-       * before StoreTiles */
-      boolean change_viewport =
-         (ctx->derived.vp.x != 0.0f || ctx->derived.vp.y != 0.0f
-          || ctx->derived.vp.width != renderTarget->width
-          || ctx->derived.vp.height != renderTarget->height);
-      if (change_viewport) {
-         SWR_VIEWPORT vp = {0};
-         vp.width = renderTarget->width;
-         vp.height = renderTarget->height;
-         SwrSetViewports(ctx->swrContext, 1, &vp, NULL);
-      }
-
-      boolean scissor_enable = ctx->derived.rastState.scissorEnable;
-      if (scissor_enable) {
-         ctx->derived.rastState.scissorEnable = FALSE;
-         SwrSetRastState(ctx->swrContext, &ctx->derived.rastState);
-      }
-
       swr_update_draw_context(ctx);
+      SWR_RECT full_rect =
+         {0, 0,
+          (int32_t)u_minify(renderTarget->width, renderTarget->lod),
+          (int32_t)u_minify(renderTarget->height, renderTarget->lod)};
       SwrStoreTiles(ctx->swrContext,
-                    (enum SWR_RENDERTARGET_ATTACHMENT)attachment,
-                    post_tile_state);
-
-      /* Restore viewport and scissor enable */
-      if (change_viewport)
-         SwrSetViewports(ctx->swrContext, 1, &ctx->derived.vp, &ctx->derived.vpm);
-      if (scissor_enable) {
-         ctx->derived.rastState.scissorEnable = scissor_enable;
-         SwrSetRastState(ctx->swrContext, &ctx->derived.rastState);
-      }
+                    1 << attachment,
+                    post_tile_state,
+                    full_rect);
    }
 }
 
@@ -306,7 +256,9 @@ swr_store_dirty_resource(struct pipe_context *pipe,
       swr_draw_context *pDC = &ctx->swrDC;
       SWR_SURFACE_STATE *renderTargets = pDC->renderTargets;
       for (uint32_t i = 0; i < SWR_NUM_ATTACHMENTS; i++)
-         if (renderTargets[i].pBaseAddress == spr->swr.pBaseAddress) {
+         if (renderTargets[i].pBaseAddress == spr->swr.pBaseAddress ||
+             (spr->secondary.pBaseAddress &&
+              renderTargets[i].pBaseAddress == spr->secondary.pBaseAddress)) {
             swr_store_render_target(pipe, i, post_tile_state);
 
             /* Mesa thinks depth/stencil are fused, so we'll never get an

@@ -33,6 +33,7 @@
 #include "xmlpool.h"
 
 #include "dri_screen.h"
+#include "dri_context.h"
 
 #include "util/u_inlines.h"
 #include "pipe/p_screen.h"
@@ -53,6 +54,12 @@ const __DRIconfigOptionsExtension gallium_config_options = {
    .xml =
 
    DRI_CONF_BEGIN
+      DRI_CONF_SECTION_PERFORMANCE
+         DRI_CONF_MESA_GLTHREAD("false")
+         DRI_CONF_DISABLE_EXT_BUFFER_AGE("false")
+         DRI_CONF_DISABLE_OML_SYNC_CONTROL("false")
+      DRI_CONF_SECTION_END
+
       DRI_CONF_SECTION_QUALITY
          DRI_CONF_FORCE_S3TC_ENABLE("false")
          DRI_CONF_PP_CELSHADE(0)
@@ -70,10 +77,14 @@ const __DRIconfigOptionsExtension gallium_config_options = {
          DRI_CONF_DISABLE_SHADER_BIT_ENCODING("false")
          DRI_CONF_FORCE_GLSL_VERSION(0)
          DRI_CONF_ALLOW_GLSL_EXTENSION_DIRECTIVE_MIDSHADER("false")
+         DRI_CONF_ALLOW_GLSL_BUILTIN_VARIABLE_REDECLARATION("false")
+         DRI_CONF_ALLOW_HIGHER_COMPAT_VERSION("false")
+         DRI_CONF_FORCE_GLSL_ABS_SQRT("false")
       DRI_CONF_SECTION_END
 
       DRI_CONF_SECTION_MISCELLANEOUS
          DRI_CONF_ALWAYS_HAVE_DEPTH_BUFFER("false")
+         DRI_CONF_GLSL_ZERO_INIT("false")
       DRI_CONF_SECTION_END
    DRI_CONF_END
 };
@@ -81,9 +92,11 @@ const __DRIconfigOptionsExtension gallium_config_options = {
 #define false 0
 
 static void
-dri_fill_st_options(struct st_config_options *options,
-                    const struct driOptionCache * optionCache)
+dri_fill_st_options(struct dri_screen *screen)
 {
+   struct st_config_options *options = &screen->options;
+   const struct driOptionCache *optionCache = &screen->optionCache;
+
    options->disable_blend_func_extended =
       driQueryOptionb(optionCache, "disable_blend_func_extended");
    options->disable_glsl_line_continuations =
@@ -98,6 +111,15 @@ dri_fill_st_options(struct st_config_options *options,
       driQueryOptionb(optionCache, "force_s3tc_enable");
    options->allow_glsl_extension_directive_midshader =
       driQueryOptionb(optionCache, "allow_glsl_extension_directive_midshader");
+   options->allow_glsl_builtin_variable_redeclaration =
+      driQueryOptionb(optionCache, "allow_glsl_builtin_variable_redeclaration");
+   options->allow_higher_compat_version =
+      driQueryOptionb(optionCache, "allow_higher_compat_version");
+   options->glsl_zero_init = driQueryOptionb(optionCache, "glsl_zero_init");
+   options->force_glsl_abs_sqrt =
+      driQueryOptionb(optionCache, "force_glsl_abs_sqrt");
+
+   driComputeOptionsSha1(optionCache, options->config_options_sha1);
 }
 
 static const __DRIconfig **
@@ -126,6 +148,7 @@ dri_fill_in_modes(struct dri_screen *screen)
    unsigned i;
    struct pipe_screen *p_screen = screen->base.screen;
    boolean pf_z16, pf_x8z24, pf_z24x8, pf_s8z24, pf_z24s8, pf_z32;
+   boolean mixed_color_depth;
 
    static const GLenum back_buffer_modes[] = {
       GLX_NONE, GLX_SWAP_UNDEFINED_OML, GLX_SWAP_COPY_OML
@@ -140,7 +163,7 @@ dri_fill_in_modes(struct dri_screen *screen)
       stencil_bits_array[0] = 0;
       depth_buffer_factor = 1;
    }
- 
+
    msaa_samples_max = (screen->st_api->feature_mask & ST_API_FEATURE_MS_VISUALS_MASK)
       ? MSAA_VISUAL_MAX_SAMPLES : 1;
 
@@ -182,6 +205,9 @@ dri_fill_in_modes(struct dri_screen *screen)
       stencil_bits_array[depth_buffer_factor++] = 0;
    }
 
+   mixed_color_depth =
+      p_screen->get_param(p_screen, PIPE_CAP_MIXED_COLOR_DEPTH_BITS);
+
    assert(ARRAY_SIZE(mesa_formats) == ARRAY_SIZE(pipe_formats));
 
    /* Add configs. */
@@ -212,7 +238,7 @@ dri_fill_in_modes(struct dri_screen *screen)
                                         depth_buffer_factor, back_buffer_modes,
                                         ARRAY_SIZE(back_buffer_modes),
                                         msaa_modes, 1,
-                                        GL_TRUE);
+                                        GL_TRUE, !mixed_color_depth);
          configs = driConcatConfigs(configs, new_configs);
 
          /* Multi-sample configs without an accumulation buffer. */
@@ -222,7 +248,7 @@ dri_fill_in_modes(struct dri_screen *screen)
                                            depth_buffer_factor, back_buffer_modes,
                                            ARRAY_SIZE(back_buffer_modes),
                                            msaa_modes+1, num_msaa_modes-1,
-                                           GL_FALSE);
+                                           GL_FALSE, !mixed_color_depth);
             configs = driConcatConfigs(configs, new_configs);
          }
       }
@@ -328,6 +354,17 @@ dri_get_egl_image(struct st_manager *smapi,
 
    stimg->texture = NULL;
    pipe_resource_reference(&stimg->texture, img->texture);
+   switch (img->dri_components) {
+   case __DRI_IMAGE_COMPONENTS_Y_U_V:
+      stimg->format = PIPE_FORMAT_IYUV;
+      break;
+   case __DRI_IMAGE_COMPONENTS_Y_UV:
+      stimg->format = PIPE_FORMAT_NV12;
+      break;
+   default:
+      stimg->format = img->texture->format;
+      break;
+   }
    stimg->level = img->level;
    stimg->layer = img->layer;
 
@@ -380,7 +417,7 @@ dri_destroy_screen_helper(struct dri_screen * screen)
       screen->base.screen->destroy(screen->base.screen);
 
    dri_destroy_option_cache(screen);
-   pipe_mutex_destroy(screen->opencl_func_mutex);
+   mtx_destroy(&screen->opencl_func_mutex);
 }
 
 void
@@ -408,6 +445,21 @@ dri_postprocessing_init(struct dri_screen *screen)
    }
 }
 
+static void
+dri_set_background_context(struct st_context_iface *st)
+{
+   struct dri_context *ctx = (struct dri_context *)st->st_manager_private;
+   const __DRIbackgroundCallableExtension *backgroundCallable =
+      ctx->sPriv->dri2.backgroundCallable;
+
+   /* Note: Mesa will only call this function if GL multithreading is enabled
+    * We only do that if the loader exposed the __DRI_BACKGROUND_CALLABLE
+    * extension. So we know that backgroundCallable is not NULL.
+    */
+   assert(backgroundCallable);
+   backgroundCallable->setBackgroundContext(ctx->cPriv->loaderPrivate);
+}
+
 const __DRIconfig **
 dri_init_screen_helper(struct dri_screen *screen,
                        struct pipe_screen *pscreen,
@@ -416,6 +468,7 @@ dri_init_screen_helper(struct dri_screen *screen,
    screen->base.screen = pscreen;
    screen->base.get_egl_image = dri_get_egl_image;
    screen->base.get_param = dri_get_param;
+   screen->base.set_background_context = dri_set_background_context;
 
    screen->st_api = st_gl_api_create();
    if (!screen->st_api)
@@ -433,7 +486,7 @@ dri_init_screen_helper(struct dri_screen *screen,
                        screen->sPriv->myNum,
                        driver_name);
 
-   dri_fill_st_options(&screen->options, &screen->optionCache);
+   dri_fill_st_options(screen);
 
    /* Handle force_s3tc_enable. */
    if (!util_format_s3tc_enabled && screen->options.force_s3tc_enable) {

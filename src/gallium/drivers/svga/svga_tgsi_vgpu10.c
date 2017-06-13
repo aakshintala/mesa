@@ -745,7 +745,7 @@ setup_operand0_indexing(struct svga_shader_emitter_v10 *emit,
                         boolean indirect, boolean index2D,
                         unsigned tempArrayID)
 {
-   unsigned indexDim, index0Rep, index1Rep = VGPU10_OPERAND_INDEX_0D;
+   unsigned indexDim, index0Rep, index1Rep = VGPU10_OPERAND_INDEX_IMMEDIATE32;
 
    /*
     * Compute index dimensions
@@ -1030,6 +1030,9 @@ emit_src_register(struct svga_shader_emitter_v10 *emit,
    operand0.value = operand1.value = 0;
 
    if (is_prim_id) {
+      /* NOTE: we should be using VGPU10_OPERAND_1_COMPONENT here, but
+       * our virtual GPU accepts this as-is.
+       */
       operand0.numComponents = VGPU10_OPERAND_0_COMPONENT;
       operand0.operandType = VGPU10_OPERAND_TYPE_INPUT_PRIMITIVEID;
    }
@@ -2631,6 +2634,28 @@ emit_temporaries_declaration(struct svga_shader_emitter_v10 *emit)
 
    total_temps = emit->num_shader_temps;
 
+   /* If there is indirect access to non-indexable temps in the shader,
+    * convert those temps to indexable temps. This works around a bug
+    * in the GLSL->TGSI translator exposed in piglit test
+    * glsl-1.20/execution/fs-const-array-of-struct-of-array.shader_test.
+    * Internal temps added by the driver remain as non-indexable temps.
+    */
+   if ((emit->info.indirect_files & (1 << TGSI_FILE_TEMPORARY)) &&
+       emit->num_temp_arrays == 0) {
+      unsigned arrayID;
+
+      arrayID = 1;
+      emit->num_temp_arrays = arrayID + 1; 
+      emit->temp_arrays[arrayID].start = 0;
+      emit->temp_arrays[arrayID].size = total_temps;
+
+      /* Fill in the temp_map entries for this temp array */
+      for (i = 0; i < total_temps; i++) {
+         emit->temp_map[i].arrayId = arrayID;
+         emit->temp_map[i].index = i;
+      }
+   }
+
    /* Allocate extra temps for specially-implemented instructions,
     * such as LIT.
     */
@@ -2740,15 +2765,16 @@ emit_temporaries_declaration(struct svga_shader_emitter_v10 *emit)
          emit->temp_map[i].index = reg++;
       }
    }
-   total_temps = reg;
 
    if (0) {
       debug_printf("total_temps %u\n", total_temps);
-      for (i = 0; i < 30; i++) {
+      for (i = 0; i < total_temps; i++) {
          debug_printf("temp %u ->  array %u  index %u\n",
                       i, emit->temp_map[i].arrayId, emit->temp_map[i].index);
       }
    }
+
+   total_temps = reg;
 
    /* Emit declaration of ordinary temp registers */
    if (total_temps > 0) {
@@ -3429,28 +3455,6 @@ emit_puint_to_sscaled(struct svga_shader_emitter_v10 *emit,
    emit_instruction_op1(emit, VGPU10_OPCODE_ITOF, dst, &tmp_src, FALSE);
 
    free_temp_indexes(emit);
-}
-
-
-/**
- * Emit code for TGSI_OPCODE_ABS instruction.
- */
-static boolean
-emit_abs(struct svga_shader_emitter_v10 *emit,
-         const struct tgsi_full_instruction *inst)
-{
-   /* dst = ABS(s0):
-    *   dst = abs(s0)
-    * Translates into:
-    *   MOV dst, abs(s0)
-    */
-   struct tgsi_full_src_register abs_src0 = absolute_src(&inst->Src[0]);
-
-   /* MOV dst, abs(s0) */
-   emit_instruction_op1(emit, VGPU10_OPCODE_MOV, &inst->Dst[0],
-                        &abs_src0, inst->Instruction.Saturate);
-
-   return TRUE;
 }
 
 
@@ -4714,29 +4718,6 @@ emit_issg(struct svga_shader_emitter_v10 *emit,
 
 
 /**
- * Emit code for TGSI_OPCODE_SUB instruction.
- */
-static boolean
-emit_sub(struct svga_shader_emitter_v10 *emit,
-         const struct tgsi_full_instruction *inst)
-{
-   /* dst = SUB(s0, s1):
-    *   dst = s0 - s1
-    * Translates into:
-    *   ADD dst, s0, neg(s1)
-    */
-   struct tgsi_full_src_register neg_src1 = negate_src(&inst->Src[1]);
-
-   /* ADD dst, s0, neg(s1) */
-   emit_instruction_op2(emit, VGPU10_OPCODE_ADD, &inst->Dst[0],
-                        &inst->Src[0], &neg_src1,
-                        inst->Instruction.Saturate);
-
-   return TRUE;
-}
-
-
-/**
  * Emit a comparison instruction.  The dest register will get
  * 0 or ~0 values depending on the outcome of comparing src0 to src1.
  */
@@ -5118,6 +5099,9 @@ emit_sample(struct svga_shader_emitter_v10 *emit,
    /* SAMPLE dst, coord(s0), resource, sampler */
    begin_emit_instruction(emit);
 
+   /* NOTE: for non-fragment shaders, we should use VGPU10_OPCODE_SAMPLE_L
+    * with LOD=0.  But our virtual GPU accepts this as-is.
+    */
    emit_sample_opcode(emit, VGPU10_OPCODE_SAMPLE,
                       inst->Instruction.Saturate, offsets);
    emit_dst_register(emit, get_tex_swizzle_dst(&swz_info));
@@ -5258,6 +5242,9 @@ emit_txp(struct svga_shader_emitter_v10 *emit,
    begin_emit_instruction(emit);
 
    if (tgsi_is_shadow_target(target))
+      /* NOTE: for non-fragment shaders, we should use
+       * VGPU10_OPCODE_SAMPLE_C_LZ, but our virtual GPU accepts this as-is.
+       */
       opcode = VGPU10_OPCODE_SAMPLE_C;
    else
       opcode = VGPU10_OPCODE_SAMPLE;
@@ -5733,8 +5720,6 @@ emit_vgpu10_instruction(struct svga_shader_emitter_v10 *emit,
       return emit_vertex(emit, inst);
    case TGSI_OPCODE_ENDPRIM:
       return emit_endprim(emit, inst);
-   case TGSI_OPCODE_ABS:
-      return emit_abs(emit, inst);
    case TGSI_OPCODE_IABS:
       return emit_iabs(emit, inst);
    case TGSI_OPCODE_ARL:
@@ -5802,8 +5787,6 @@ emit_vgpu10_instruction(struct svga_shader_emitter_v10 *emit,
       return emit_ssg(emit, inst);
    case TGSI_OPCODE_ISSG:
       return emit_issg(emit, inst);
-   case TGSI_OPCODE_SUB:
-      return emit_sub(emit, inst);
    case TGSI_OPCODE_TEX:
       return emit_tex(emit, inst);
    case TGSI_OPCODE_TXP:
@@ -6692,12 +6675,13 @@ svga_tgsi_vgpu10_translate(struct svga_context *svga,
    /* These two flags cannot be used together */
    assert(key->vs.need_prescale + key->vs.undo_viewport <= 1);
 
+   SVGA_STATS_TIME_PUSH(svga_sws(svga), SVGA_STATS_TIME_TGSIVGPU10TRANSLATE);
    /*
     * Setup the code emitter
     */
    emit = alloc_emitter();
    if (!emit)
-      return NULL;
+      goto done;
 
    emit->unit = unit;
    emit->key = *key;
@@ -6862,5 +6846,7 @@ svga_tgsi_vgpu10_translate(struct svga_context *svga,
 cleanup:
    free_emitter(emit);
 
+done:
+   SVGA_STATS_TIME_POP(svga_sws(svga));
    return variant;
 }

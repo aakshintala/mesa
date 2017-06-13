@@ -47,6 +47,11 @@
  */
 static enum pipe_format r300_unbyteswap_array_format(enum pipe_format format)
 {
+    /* FIXME: Disabled on little endian because of a reported regression:
+     * https://bugs.freedesktop.org/show_bug.cgi?id=98869 */
+    if (PIPE_ENDIAN_NATIVE != PIPE_ENDIAN_BIG)
+        return format;
+
     /* Only BGRA 8888 array formats are supported for simplicity of
      * the implementation. */
     switch (format) {
@@ -1025,17 +1030,18 @@ static void r300_texture_destroy(struct pipe_screen *screen,
     struct r300_resource* tex = (struct r300_resource*)texture;
 
     if (tex->tex.cmask_dwords) {
-        pipe_mutex_lock(rscreen->cmask_mutex);
+        mtx_lock(&rscreen->cmask_mutex);
         if (texture == rscreen->cmask_resource) {
             rscreen->cmask_resource = NULL;
         }
-        pipe_mutex_unlock(rscreen->cmask_mutex);
+        mtx_unlock(&rscreen->cmask_mutex);
     }
     pb_reference(&tex->buf, NULL);
     FREE(tex);
 }
 
 boolean r300_resource_get_handle(struct pipe_screen* screen,
+                                 struct pipe_context *ctx,
                                  struct pipe_resource *texture,
                                  struct winsys_handle *whandle,
                                  unsigned usage)
@@ -1058,7 +1064,6 @@ static const struct u_resource_vtbl r300_texture_vtbl =
     r300_texture_transfer_map,      /* transfer_map */
     NULL,                           /* transfer_flush_region */
     r300_texture_transfer_unmap,    /* transfer_unmap */
-    NULL /* transfer_inline_write */
 };
 
 /* The common texture constructor. */
@@ -1114,7 +1119,7 @@ r300_texture_create_object(struct r300_screen *rscreen,
     /* Create the backing buffer if needed. */
     if (!tex->buf) {
         tex->buf = rws->buffer_create(rws, tex->tex.size_in_bytes, 2048,
-                                      tex->domain, 0);
+                                      tex->domain, RADEON_FLAG_HANDLE);
 
         if (!tex->buf) {
             goto fail;
@@ -1127,9 +1132,9 @@ r300_texture_create_object(struct r300_screen *rscreen,
                 util_format_is_depth_or_stencil(base->format) ? "depth" : "color");
     }
 
-    tiling.microtile = tex->tex.microtile;
-    tiling.macrotile = tex->tex.macrotile[0];
-    tiling.stride = tex->tex.stride_in_bytes[0];
+    tiling.u.legacy.microtile = tex->tex.microtile;
+    tiling.u.legacy.macrotile = tex->tex.macrotile[0];
+    tiling.u.legacy.stride = tex->tex.stride_in_bytes[0];
     rws->buffer_set_metadata(tex->buf, &tiling);
 
     return tex;
@@ -1190,20 +1195,20 @@ struct pipe_resource *r300_texture_from_handle(struct pipe_screen *screen,
 
     /* Enforce a microtiled zbuffer. */
     if (util_format_is_depth_or_stencil(base->format) &&
-        tiling.microtile == RADEON_LAYOUT_LINEAR) {
+        tiling.u.legacy.microtile == RADEON_LAYOUT_LINEAR) {
         switch (util_format_get_blocksize(base->format)) {
             case 4:
-                tiling.microtile = RADEON_LAYOUT_TILED;
+                tiling.u.legacy.microtile = RADEON_LAYOUT_TILED;
                 break;
 
             case 2:
-                tiling.microtile = RADEON_LAYOUT_SQUARETILED;
+                tiling.u.legacy.microtile = RADEON_LAYOUT_SQUARETILED;
                 break;
         }
     }
 
     return (struct pipe_resource*)
-           r300_texture_create_object(rscreen, base, tiling.microtile, tiling.macrotile,
+           r300_texture_create_object(rscreen, base, tiling.u.legacy.microtile, tiling.u.legacy.macrotile,
                                       stride, buffer);
 }
 

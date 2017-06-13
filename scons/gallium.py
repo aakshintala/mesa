@@ -256,7 +256,7 @@ def generate(env):
         if env['build'] == 'profile':
             env['debug'] = False
             env['profile'] = True
-        if env['build'] == 'release':
+        if env['build'] in ('release', 'opt'):
             env['debug'] = False
             env['profile'] = False
 
@@ -291,8 +291,9 @@ def generate(env):
     # C preprocessor options
     cppdefines = []
     cppdefines += [
-        '__STDC_LIMIT_MACROS',
         '__STDC_CONSTANT_MACROS',
+        '__STDC_FORMAT_MACROS',
+        '__STDC_LIMIT_MACROS',
         'HAVE_NO_AUTOCONF',
     ]
     if env['build'] in ('debug', 'checked'):
@@ -301,6 +302,8 @@ def generate(env):
         cppdefines += ['NDEBUG']
     if env['build'] == 'profile':
         cppdefines += ['PROFILE']
+    if env['build'] in ('opt', 'profile'):
+        cppdefines += ['VMX86_STATS']
     if env['platform'] in ('posix', 'linux', 'freebsd', 'darwin'):
         cppdefines += [
             '_POSIX_SOURCE',
@@ -321,10 +324,6 @@ def generate(env):
                 'GLX_DIRECT_RENDERING',
                 'GLX_INDIRECT_RENDERING',
             ]
-        if env['platform'] in ('linux', 'freebsd'):
-            cppdefines += ['HAVE_ALIAS']
-        else:
-            cppdefines += ['GLX_ALIAS_UNSUPPORTED']
 
         if env['platform'] in ('linux', 'darwin'):
             cppdefines += ['HAVE_XLOCALE_H']
@@ -450,7 +449,7 @@ def generate(env):
             ccflags += [
                 '/O2', # optimize for speed
             ]
-        if env['build'] == 'release':
+        if env['build'] in ('release', 'opt'):
             if not env['clang']:
                 ccflags += [
                     '/GL', # enable whole program optimization
@@ -561,7 +560,7 @@ def generate(env):
             shlinkflags += ['-Wl,--enable-stdcall-fixup']
             #shlinkflags += ['-Wl,--kill-at']
     if msvc:
-        if env['build'] == 'release' and not env['clang']:
+        if env['build'] in ('release', 'opt') and not env['clang']:
             # enable Link-time Code Generation
             linkflags += ['/LTCG']
             env.Append(ARFLAGS = ['/LTCG'])
@@ -646,11 +645,10 @@ def generate(env):
     env.AddMethod(msvc2013_compat, 'MSVC2013Compat')
     env.AddMethod(unit_test, 'UnitTest')
 
-    env.PkgCheckModules('X11', ['x11', 'xext', 'xdamage', 'xfixes', 'glproto >= 1.4.13'])
+    env.PkgCheckModules('X11', ['x11', 'xext', 'xdamage >= 1.1', 'xfixes', 'glproto >= 1.4.13', 'dri2proto >= 2.8'])
     env.PkgCheckModules('XCB', ['x11-xcb', 'xcb-glx >= 1.8.1', 'xcb-dri2 >= 1.8'])
     env.PkgCheckModules('XF86VIDMODE', ['xxf86vm'])
-    env.PkgCheckModules('DRM', ['libdrm >= 2.4.38'])
-    env.PkgCheckModules('UDEV', ['libudev >= 151'])
+    env.PkgCheckModules('DRM', ['libdrm >= 2.4.75'])
 
     if env['x11']:
         env.Append(CPPPATH = env['X11_CPPPATH'])

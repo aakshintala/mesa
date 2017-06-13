@@ -38,8 +38,8 @@
 #include "image.h"
 #include "macros.h"
 #include "util/half_float.h"
-#include "../../gallium/auxiliary/util/u_format_rgb9e5.h"
-#include "../../gallium/auxiliary/util/u_format_r11g11b10f.h"
+#include "util/format_rgb9e5.h"
+#include "util/format_r11g11b10f.h"
 
 
 
@@ -757,7 +757,7 @@ do_row(GLenum datatype, GLuint comps, GLint srcWidth,
    }
 
    else {
-      _mesa_problem(NULL, "bad format in do_row()");
+      unreachable("bad format in do_row()");
    }
 }
 
@@ -1401,7 +1401,7 @@ do_row_3D(GLenum datatype, GLuint comps, GLint srcWidth,
    }
 
    else {
-      _mesa_problem(NULL, "bad format in do_row()");
+      unreachable("bad format in do_row()");
    }
 }
 
@@ -1754,8 +1754,7 @@ _mesa_generate_mipmap_level(GLenum target,
       /* no mipmaps, do nothing */
       break;
    default:
-      _mesa_problem(NULL, "bad tex target in _mesa_generate_mipmaps");
-      return;
+      unreachable("bad tex target in _mesa_generate_mipmaps");
    }
 }
 
@@ -1777,7 +1776,8 @@ _mesa_next_mipmap_level_size(GLenum target, GLint border,
    }
 
    if ((srcHeight - 2 * border > 1) && 
-       (target != GL_TEXTURE_1D_ARRAY_EXT)) {
+       target != GL_TEXTURE_1D_ARRAY_EXT &&
+       target != GL_PROXY_TEXTURE_1D_ARRAY_EXT) {
       *dstHeight = (srcHeight - 2 * border) / 2 + 2 * border;
    }
    else {
@@ -1785,8 +1785,10 @@ _mesa_next_mipmap_level_size(GLenum target, GLint border,
    }
 
    if ((srcDepth - 2 * border > 1) &&
-       (target != GL_TEXTURE_2D_ARRAY_EXT &&
-        target != GL_TEXTURE_CUBE_MAP_ARRAY)) {
+       target != GL_TEXTURE_2D_ARRAY_EXT &&
+       target != GL_PROXY_TEXTURE_2D_ARRAY_EXT &&
+       target != GL_TEXTURE_CUBE_MAP_ARRAY &&
+       target != GL_PROXY_TEXTURE_CUBE_MAP_ARRAY) {
       *dstDepth = (srcDepth - 2 * border) / 2 + 2 * border;
    }
    else {
@@ -1864,7 +1866,7 @@ prepare_mipmap_level(struct gl_context *ctx,
          /* in case the mipmap level is part of an FBO: */
          _mesa_update_fbo_texture(ctx, texObj, face, level);
 
-         ctx->NewState |= _NEW_TEXTURE;
+         ctx->NewState |= _NEW_TEXTURE_OBJECT;
       }
    }
 

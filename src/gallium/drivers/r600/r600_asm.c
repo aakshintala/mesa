@@ -27,6 +27,7 @@
 #include "r600d.h"
 
 #include <errno.h>
+#include "util/u_bitcast.h"
 #include "util/u_dump.h"
 #include "util/u_memory.h"
 #include "util/u_math.h"
@@ -314,7 +315,7 @@ static int is_alu_any_unit_inst(struct r600_bytecode *bc, struct r600_bytecode_a
 static int is_nop_inst(struct r600_bytecode *bc, struct r600_bytecode_alu *alu)
 {
 	return alu->op == ALU_OP0_NOP;
-}		
+}
 
 static int assign_alu_units(struct r600_bytecode *bc, struct r600_bytecode_alu *alu_first,
 			    struct r600_bytecode_alu *assignment[5])
@@ -1687,11 +1688,13 @@ int r600_bytecode_build(struct r600_bytecode *bc)
 	unsigned addr;
 	int i, r;
 
-	if (!bc->nstack) // If not 0, Stack_size already provided by llvm
-		bc->nstack = bc->stack.max_entries;
-
-	if ((bc->type == PIPE_SHADER_VERTEX || bc->type == PIPE_SHADER_TESS_EVAL || bc->type == PIPE_SHADER_TESS_CTRL) && !bc->nstack) {
-		bc->nstack = 1;
+	if (!bc->nstack) { // If not 0, Stack_size already provided by llvm
+		if (bc->stack.max_entries)
+			bc->nstack = bc->stack.max_entries;
+		else if (bc->type == PIPE_SHADER_VERTEX ||
+			 bc->type == PIPE_SHADER_TESS_EVAL ||
+			 bc->type == PIPE_SHADER_TESS_CTRL)
+			bc->nstack = 1;
 	}
 
 	/* first path compute addr of each CF block */
@@ -1956,7 +1959,7 @@ static int print_src(struct r600_bytecode_alu *alu, unsigned idx)
 			need_chan = 1;
 			break;
 		case V_SQ_ALU_SRC_LITERAL:
-			o += fprintf(stderr, "[0x%08X %f]", src->value, *(float*)&src->value);
+			o += fprintf(stderr, "[0x%08X %f]", src->value, u_bitcast_u2f(src->value));
 			break;
 		case V_SQ_ALU_SRC_0_5:
 			o += fprintf(stderr, "0.5");
@@ -2340,6 +2343,12 @@ void r600_vertex_data_type(enum pipe_format pformat,
 	if (pformat == PIPE_FORMAT_R11G11B10_FLOAT) {
 		*format = FMT_10_11_11_FLOAT;
 		*endian = r600_endian_swap(32);
+		return;
+	}
+
+	if (pformat == PIPE_FORMAT_B5G6R5_UNORM) {
+		*format = FMT_5_6_5;
+		*endian = r600_endian_swap(16);
 		return;
 	}
 

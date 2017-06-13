@@ -24,10 +24,8 @@
 /**
  * @file vc4_opt_vpm.c
  *
- * This modifies instructions that:
- * 1. exclusively consume a value read from the VPM to directly read the VPM if
- *    other operands allow it.
- * 2. generate the value consumed by a VPM write to write directly into the VPM.
+ * This modifies instructions that exclusively consume a value read from the
+ * VPM to directly read the VPM if other operands allow it.
  */
 
 #include "vc4_qir.h"
@@ -38,22 +36,17 @@ qir_opt_vpm(struct vc4_compile *c)
         if (c->stage == QSTAGE_FRAG)
                 return false;
 
+        /* For now, only do this pass when we don't have control flow. */
+        struct qblock *block = qir_entry_block(c);
+        if (block != qir_exit_block(c))
+                return false;
+
         bool progress = false;
-        struct qinst *vpm_writes[64] = { 0 };
         uint32_t use_count[c->num_temps];
-        uint32_t vpm_write_count = 0;
         memset(&use_count, 0, sizeof(use_count));
 
-        list_for_each_entry(struct qinst, inst, &c->instructions, link) {
-                switch (inst->dst.file) {
-                case QFILE_VPM:
-                        vpm_writes[vpm_write_count++] = inst;
-                        break;
-                default:
-                        break;
-                }
-
-                for (int i = 0; i < qir_get_op_nsrc(inst->op); i++) {
+        qir_for_each_inst_inorder(inst, c) {
+                for (int i = 0; i < qir_get_nsrc(inst); i++) {
                         if (inst->src[i].file == QFILE_TEMP) {
                                 uint32_t temp = inst->src[i].index;
                                 use_count[temp]++;
@@ -64,7 +57,7 @@ qir_opt_vpm(struct vc4_compile *c)
         /* For instructions reading from a temporary that contains a VPM read
          * result, try to move the instruction up in place of the VPM read.
          */
-        list_for_each_entry(struct qinst, inst, &c->instructions, link) {
+        qir_for_each_inst_inorder(inst, c) {
                 if (!inst)
                         continue;
 
@@ -76,7 +69,7 @@ qir_opt_vpm(struct vc4_compile *c)
                     qir_is_tex(inst))
                         continue;
 
-                for (int j = 0; j < qir_get_op_nsrc(inst->op); j++) {
+                for (int j = 0; j < qir_get_nsrc(inst); j++) {
                         if (inst->src[j].file != QFILE_TEMP ||
                             inst->src[j].pack)
                                 continue;
@@ -101,7 +94,7 @@ qir_opt_vpm(struct vc4_compile *c)
                         }
 
                         uint32_t temps = 0;
-                        for (int k = 0; k < qir_get_op_nsrc(inst->op); k++) {
+                        for (int k = 0; k < qir_get_nsrc(inst); k++) {
                                 if (inst->src[k].file == QFILE_TEMP)
                                         temps++;
                         }
@@ -110,52 +103,16 @@ qir_opt_vpm(struct vc4_compile *c)
                          * sources are independent of previous instructions
                          */
                         if (temps == 1) {
-                                list_del(&inst->link);
                                 inst->src[j] = mov->src[0];
-                                list_replace(&mov->link, &inst->link);
-                                c->defs[temp] = NULL;
-                                free(mov);
+
+                                list_del(&inst->link);
+                                list_addtail(&inst->link, &mov->link);
+                                qir_remove_instruction(c, mov);
+
                                 progress = true;
                                 break;
                         }
                 }
-        }
-
-        for (int i = 0; i < vpm_write_count; i++) {
-                if (!qir_is_raw_mov(vpm_writes[i]) ||
-                    vpm_writes[i]->src[0].file != QFILE_TEMP) {
-                        continue;
-                }
-
-                uint32_t temp = vpm_writes[i]->src[0].index;
-                if (use_count[temp] != 1)
-                        continue;
-
-                struct qinst *inst = c->defs[temp];
-                if (!inst)
-                        continue;
-
-                if (qir_depends_on_flags(inst) || inst->sf)
-                        continue;
-
-                if (qir_has_side_effects(c, inst) ||
-                    qir_has_side_effect_reads(c, inst)) {
-                        continue;
-                }
-
-                /* Move the generating instruction to the end of the program
-                 * to maintain the order of the VPM writes.
-                 */
-                assert(!vpm_writes[i]->sf);
-                list_del(&inst->link);
-                list_addtail(&inst->link, &vpm_writes[i]->link);
-                qir_remove_instruction(c, vpm_writes[i]);
-
-                c->defs[inst->dst.index] = NULL;
-                inst->dst.file = QFILE_VPM;
-                inst->dst.index = 0;
-
-                progress = true;
         }
 
         return progress;

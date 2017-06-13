@@ -78,6 +78,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "main/api_arrayelt.h"
 #include "main/vtxfmt.h"
 #include "main/dispatch.h"
+#include "main/state.h"
 #include "util/bitscan.h"
 
 #include "vbo_context.h"
@@ -1159,6 +1160,9 @@ _save_OBE_DrawArrays(GLenum mode, GLint start, GLsizei count)
    if (save->out_of_memory)
       return;
 
+   /* Make sure to process any VBO binding changes */
+   _mesa_update_state(ctx);
+
    _ae_map_vbos(ctx);
 
    vbo_save_NotifyBegin(ctx, (mode | VBO_SAVE_PRIM_WEAK
@@ -1172,12 +1176,46 @@ _save_OBE_DrawArrays(GLenum mode, GLint start, GLsizei count)
 }
 
 
+static void GLAPIENTRY
+_save_OBE_MultiDrawArrays(GLenum mode, const GLint *first,
+                          const GLsizei *count, GLsizei primcount)
+{
+   GET_CURRENT_CONTEXT(ctx);
+   GLint i;
+
+   if (!_mesa_is_valid_prim_mode(ctx, mode)) {
+      _mesa_compile_error(ctx, GL_INVALID_ENUM, "glMultiDrawArrays(mode)");
+      return;
+   }
+
+   if (primcount < 0) {
+      _mesa_compile_error(ctx, GL_INVALID_VALUE,
+                          "glMultiDrawArrays(primcount<0)");
+      return;
+   }
+
+   for (i = 0; i < primcount; i++) {
+      if (count[i] < 0) {
+         _mesa_compile_error(ctx, GL_INVALID_VALUE,
+                             "glMultiDrawArrays(count[i]<0)");
+         return;
+      }
+   }
+
+   for (i = 0; i < primcount; i++) {
+      if (count[i] > 0) {
+         _save_OBE_DrawArrays(mode, first[i], count[i]);
+      }
+   }
+}
+
+
 /* Could do better by copying the arrays and element list intact and
  * then emitting an indexed prim at runtime.
  */
 static void GLAPIENTRY
-_save_OBE_DrawElements(GLenum mode, GLsizei count, GLenum type,
-                       const GLvoid * indices)
+_save_OBE_DrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type,
+                                 const GLvoid * indices, GLint basevertex)
 {
    GET_CURRENT_CONTEXT(ctx);
    struct vbo_save_context *save = &vbo_context(ctx)->save;
@@ -1202,6 +1240,9 @@ _save_OBE_DrawElements(GLenum mode, GLsizei count, GLenum type,
    if (save->out_of_memory)
       return;
 
+   /* Make sure to process any VBO binding changes */
+   _mesa_update_state(ctx);
+
    _ae_map_vbos(ctx);
 
    if (_mesa_is_bufferobj(indexbuf))
@@ -1214,15 +1255,15 @@ _save_OBE_DrawElements(GLenum mode, GLsizei count, GLenum type,
    switch (type) {
    case GL_UNSIGNED_BYTE:
       for (i = 0; i < count; i++)
-         CALL_ArrayElement(GET_DISPATCH(), (((GLubyte *) indices)[i]));
+         CALL_ArrayElement(GET_DISPATCH(), (basevertex + ((GLubyte *) indices)[i]));
       break;
    case GL_UNSIGNED_SHORT:
       for (i = 0; i < count; i++)
-         CALL_ArrayElement(GET_DISPATCH(), (((GLushort *) indices)[i]));
+         CALL_ArrayElement(GET_DISPATCH(), (basevertex + ((GLushort *) indices)[i]));
       break;
    case GL_UNSIGNED_INT:
       for (i = 0; i < count; i++)
-         CALL_ArrayElement(GET_DISPATCH(), (((GLuint *) indices)[i]));
+         CALL_ArrayElement(GET_DISPATCH(), (basevertex + ((GLuint *) indices)[i]));
       break;
    default:
       _mesa_error(ctx, GL_INVALID_ENUM, "glDrawElements(type)");
@@ -1232,6 +1273,13 @@ _save_OBE_DrawElements(GLenum mode, GLsizei count, GLenum type,
    CALL_End(GET_DISPATCH(), ());
 
    _ae_unmap_vbos(ctx);
+}
+
+static void GLAPIENTRY
+_save_OBE_DrawElements(GLenum mode, GLsizei count, GLenum type,
+                       const GLvoid * indices)
+{
+   _save_OBE_DrawElementsBaseVertex(mode, count, type, indices, 0);
 }
 
 
@@ -1470,7 +1518,9 @@ vbo_initialize_save_dispatch(const struct gl_context *ctx,
                              struct _glapi_table *exec)
 {
    SET_DrawArrays(exec, _save_OBE_DrawArrays);
+   SET_MultiDrawArrays(exec, _save_OBE_MultiDrawArrays);
    SET_DrawElements(exec, _save_OBE_DrawElements);
+   SET_DrawElementsBaseVertex(exec, _save_OBE_DrawElementsBaseVertex);
    SET_DrawRangeElements(exec, _save_OBE_DrawRangeElements);
    SET_MultiDrawElementsEXT(exec, _save_OBE_MultiDrawElements);
    SET_MultiDrawElementsBaseVertex(exec, _save_OBE_MultiDrawElementsBaseVertex);

@@ -53,7 +53,6 @@
 #include "pipe/p_state.h"
 #include "pipe/p_defines.h"
 #include "util/u_format.h"
-#include "util/u_framebuffer.h"
 #include "util/u_inlines.h"
 #include "util/u_simple_shaders.h"
 
@@ -184,8 +183,7 @@ clear_with_quad(struct gl_context *ctx, unsigned clear_buffers)
    const GLfloat x1 = (GLfloat) ctx->DrawBuffer->_Xmax / fb_width * 2.0f - 1.0f;
    const GLfloat y0 = (GLfloat) ctx->DrawBuffer->_Ymin / fb_height * 2.0f - 1.0f;
    const GLfloat y1 = (GLfloat) ctx->DrawBuffer->_Ymax / fb_height * 2.0f - 1.0f;
-   unsigned num_layers =
-      util_framebuffer_get_num_layers(&st->state.framebuffer);
+   unsigned num_layers = st->state.fb_num_layers;
 
    /*
    printf("%s %s%s%s %f,%f %f,%f\n", __func__,
@@ -313,11 +311,13 @@ clear_with_quad(struct gl_context *ctx, unsigned clear_buffers)
 static inline GLboolean
 is_scissor_enabled(struct gl_context *ctx, struct gl_renderbuffer *rb)
 {
+   const struct gl_scissor_rect *scissor = &ctx->Scissor.ScissorArray[0];
+
    return (ctx->Scissor.EnableFlags & 1) &&
-          (ctx->Scissor.ScissorArray[0].X > 0 ||
-           ctx->Scissor.ScissorArray[0].Y > 0 ||
-           (unsigned) ctx->Scissor.ScissorArray[0].Width < rb->Width ||
-           (unsigned) ctx->Scissor.ScissorArray[0].Height < rb->Height);
+          (scissor->X > 0 ||
+           scissor->Y > 0 ||
+           scissor->X + scissor->Width < (int)rb->Width ||
+           scissor->Y + scissor->Height < (int)rb->Height);
 }
 
 /**
@@ -404,7 +404,7 @@ st_Clear(struct gl_context *ctx, GLbitfield mask)
    st_invalidate_readpix_cache(st);
 
    /* This makes sure the pipe has the latest scissor, etc values */
-   st_validate_state( st, ST_PIPELINE_RENDER );
+   st_validate_state(st, ST_PIPELINE_CLEAR);
 
    if (mask & BUFFER_BITS_COLOR) {
       for (i = 0; i < ctx->DrawBuffer->_NumColorDrawBuffers; i++) {

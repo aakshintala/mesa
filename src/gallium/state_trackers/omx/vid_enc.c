@@ -48,7 +48,6 @@
 
 #include "pipe/p_screen.h"
 #include "pipe/p_video_codec.h"
-#include "state_tracker/drm_driver.h"
 #include "util/u_memory.h"
 #include "vl/vl_video_buffer.h"
 
@@ -180,7 +179,7 @@ static OMX_ERRORTYPE vid_enc_Constructor(OMX_COMPONENTTYPE *comp, OMX_STRING nam
                                 PIPE_VIDEO_ENTRYPOINT_ENCODE, PIPE_VIDEO_CAP_SUPPORTED))
       return OMX_ErrorBadParameter;
 
-   priv->s_pipe = screen->context_create(screen, priv->screen, 0);
+   priv->s_pipe = screen->context_create(screen, NULL, 0);
    if (!priv->s_pipe)
       return OMX_ErrorInsufficientResources;
 
@@ -197,7 +196,7 @@ static OMX_ERRORTYPE vid_enc_Constructor(OMX_COMPONENTTYPE *comp, OMX_STRING nam
       return OMX_ErrorInsufficientResources;
    }
 
-   priv->t_pipe = screen->context_create(screen, priv->screen, 0);
+   priv->t_pipe = screen->context_create(screen, NULL, 0);
    if (!priv->t_pipe)
       return OMX_ErrorInsufficientResources;
 
@@ -246,7 +245,7 @@ static OMX_ERRORTYPE vid_enc_Constructor(OMX_COMPONENTTYPE *comp, OMX_STRING nam
    priv->quant.nQpB = OMX_VID_ENC_QUANT_B_FRAMES_DEFAULT;
 
    priv->profile_level.eProfile = OMX_VIDEO_AVCProfileBaseline;
-   priv->profile_level.eLevel = OMX_VIDEO_AVCLevel42;
+   priv->profile_level.eLevel = OMX_VIDEO_AVCLevel51;
 
    priv->force_pic_type.IntraRefreshVOP = OMX_FALSE;
    priv->frame_num = 0;
@@ -473,6 +472,8 @@ static OMX_ERRORTYPE vid_enc_GetParameter(OMX_HANDLETYPE handle, OMX_INDEXTYPE i
 
       if (format->nPortIndex > 1)
          return OMX_ErrorBadPortIndex;
+      if (format->nIndex >= 1)
+         return OMX_ErrorNoMore;
 
       port = (omx_base_video_PortType *)priv->ports[format->nPortIndex];
       memcpy(format, &port->sVideoParam, sizeof(OMX_VIDEO_PARAM_PORTFORMATTYPE));
@@ -874,8 +875,8 @@ static void enc_ReleaseTasks(struct list_head *head)
 {
    struct encode_task *i, *next;
 
-   if (!head)
-	   return;
+   if (!head || !head->next)
+      return;
 
    LIST_FOR_EACH_ENTRY_SAFE(i, next, head, list) {
       pipe_resource_reference(&i->bitstream, NULL);
@@ -905,16 +906,16 @@ static OMX_ERRORTYPE enc_LoadImage(omx_base_PortType *port, OMX_BUFFERHEADERTYPE
       box.width = def->nFrameWidth;
       box.height = def->nFrameHeight;
       box.depth = 1;
-      priv->s_pipe->transfer_inline_write(priv->s_pipe, views[0]->texture, 0,
-                                          PIPE_TRANSFER_WRITE, &box,
-                                          ptr, def->nStride, 0);
+      priv->s_pipe->texture_subdata(priv->s_pipe, views[0]->texture, 0,
+                                    PIPE_TRANSFER_WRITE, &box,
+                                    ptr, def->nStride, 0);
       ptr = ((uint8_t*)buf->pBuffer) + (def->nStride * box.height);
       box.width = def->nFrameWidth / 2;
       box.height = def->nFrameHeight / 2;
       box.depth = 1;
-      priv->s_pipe->transfer_inline_write(priv->s_pipe, views[1]->texture, 0,
-                                          PIPE_TRANSFER_WRITE, &box,
-                                          ptr, def->nStride, 0);
+      priv->s_pipe->texture_subdata(priv->s_pipe, views[1]->texture, 0,
+                                    PIPE_TRANSFER_WRITE, &box,
+                                    ptr, def->nStride, 0);
    } else {
       struct pipe_blit_info blit;
       struct vl_video_buffer *dst_buf = (struct vl_video_buffer *)vbuf;
@@ -1006,6 +1007,14 @@ static void enc_ScaleInput(omx_base_PortType *port, struct pipe_video_buffer **v
    priv->current_scale_buffer %= OMX_VID_ENC_NUM_SCALING_BUFFERS;
 }
 
+static void enc_GetPictureParamPreset(struct pipe_h264_enc_picture_desc *picture)
+{
+   picture->motion_est.enc_disable_sub_mode = 0x000000fe;
+   picture->motion_est.enc_ime2_search_range_x = 0x00000001;
+   picture->motion_est.enc_ime2_search_range_y = 0x00000001;
+   picture->pic_ctrl.enc_constraint_set_flags = 0x00000040;
+}
+
 static void enc_ControlPicture(omx_base_PortType *port, struct pipe_h264_enc_picture_desc *picture)
 {
    OMX_COMPONENTTYPE* comp = port->standCompContainer;
@@ -1064,6 +1073,8 @@ static void enc_ControlPicture(omx_base_PortType *port, struct pipe_h264_enc_pic
    picture->frame_num = priv->frame_num;
    picture->ref_idx_l0 = priv->ref_idx_l0;
    picture->ref_idx_l1 = priv->ref_idx_l1;
+   picture->enable_vui = (picture->rate_ctrl.frame_rate_num != 0);
+   enc_GetPictureParamPreset(picture);
 }
 
 static void enc_HandleTask(omx_base_PortType *port, struct encode_task *task,
@@ -1080,8 +1091,10 @@ static void enc_HandleTask(omx_base_PortType *port, struct encode_task *task,
    priv->s_pipe->flush(priv->s_pipe, NULL, 0);
 
    /* -------------- allocate output buffer --------- */
-   task->bitstream = pipe_buffer_create(priv->s_pipe->screen, PIPE_BIND_VERTEX_BUFFER,
-                                        PIPE_USAGE_STREAM, size);
+   task->bitstream = pipe_buffer_create(priv->s_pipe->screen,
+                                        PIPE_BIND_VERTEX_BUFFER,
+                                        PIPE_USAGE_STAGING, /* map for read */
+                                        size);
 
    picture.picture_type = picture_type;
    picture.pic_order_cnt = task->pic_order_cnt;
@@ -1259,4 +1272,7 @@ static void vid_enc_BufferEncoded(OMX_COMPONENTTYPE *comp, OMX_BUFFERHEADERTYPE*
 
    output->nOffset = 0;
    output->nFilledLen = size; /* mark buffer as full */
+
+   /* all output buffers contain exactly one frame */
+   output->nFlags = OMX_BUFFERFLAG_ENDOFFRAME;
 }

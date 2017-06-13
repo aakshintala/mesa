@@ -52,11 +52,12 @@
 /* Override intel default.
  */
 static void
-i915InvalidateState(struct gl_context * ctx, GLuint new_state)
+i915InvalidateState(struct gl_context * ctx)
 {
+   GLuint new_state = ctx->NewState;
+
    _swrast_InvalidateState(ctx, new_state);
    _swsetup_InvalidateState(ctx, new_state);
-   _vbo_InvalidateState(ctx, new_state);
    _tnl_InvalidateState(ctx, new_state);
    _tnl_invalidate_vertex_state(ctx, new_state);
    intel_context(ctx)->NewGLState |= new_state;
@@ -260,7 +261,6 @@ i915CreateContext(int api,
    struct gl_shader_compiler_options *const fs_options =
       & ctx->Const.ShaderCompilerOptions[MESA_SHADER_FRAGMENT];
    fs_options->MaxIfDepth = 0;
-   fs_options->EmitNoNoise = true;
    fs_options->EmitNoPow = true;
    fs_options->EmitNoMainReturn = true;
    fs_options->EmitNoIndirectInput = true;

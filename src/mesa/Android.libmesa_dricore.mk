@@ -24,8 +24,6 @@
 # libmesa_dricore.a
 # ----------------------------------------------------------------------
 
-ifeq ($(strip $(MESA_BUILD_CLASSIC)),true)
-
 LOCAL_PATH := $(call my-dir)
 
 # Import the following variables:
@@ -60,7 +58,11 @@ LOCAL_C_INCLUDES := \
 	$(MESA_TOP)/src/mesa/main \
 	$(MESA_TOP)/src/compiler/nir \
 	$(MESA_TOP)/src/gallium/include \
-	$(MESA_TOP)/src/gallium/auxiliary
+	$(MESA_TOP)/src/gallium/auxiliary \
+	$(dir $(MESA_GEN_GLSL_H))
+
+LOCAL_GENERATED_SOURCES += \
+	$(MESA_GEN_GLSL_H)
 
 LOCAL_WHOLE_STATIC_LIBRARIES += \
 	libmesa_program
@@ -68,5 +70,3 @@ LOCAL_WHOLE_STATIC_LIBRARIES += \
 include $(LOCAL_PATH)/Android.gen.mk
 include $(MESA_COMMON_MK)
 include $(BUILD_STATIC_LIBRARY)
-
-endif # MESA_BUILD_CLASSIC

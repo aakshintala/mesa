@@ -130,10 +130,8 @@ static inline struct intel_renderbuffer *
 intel_renderbuffer(struct gl_renderbuffer *rb)
 {
    struct intel_renderbuffer *irb = (struct intel_renderbuffer *) rb;
-   if (irb && irb->Base.Base.ClassID == INTEL_RB_CLASS) {
-      /*_mesa_warning(NULL, "Returning non-intel Rb\n");*/
+   if (irb && irb->Base.Base.ClassID == INTEL_RB_CLASS)
       return irb;
-   }
    else
       return NULL;
 }
@@ -169,7 +167,7 @@ intel_rb_format(const struct intel_renderbuffer *rb)
 }
 
 extern struct intel_renderbuffer *
-intel_create_renderbuffer(mesa_format format, unsigned num_samples);
+intel_create_winsys_renderbuffer(mesa_format format, unsigned num_samples);
 
 struct intel_renderbuffer *
 intel_create_private_renderbuffer(mesa_format format, unsigned num_samples);
@@ -197,33 +195,6 @@ intel_renderbuffer_get_tile_offsets(struct intel_renderbuffer *irb,
 bool
 intel_renderbuffer_has_hiz(struct intel_renderbuffer *irb);
 
-void
-intel_renderbuffer_att_set_needs_depth_resolve(struct gl_renderbuffer_attachment *att);
-
-
-/**
- * \brief Perform a HiZ resolve on the renderbuffer.
- *
- * It is safe to call this function on a renderbuffer without HiZ. In that
- * case, the function is a no-op.
- *
- * \return false if no resolve was needed
- */
-bool
-intel_renderbuffer_resolve_hiz(struct brw_context *brw,
-			       struct intel_renderbuffer *irb);
-
-/**
- * \brief Perform a depth resolve on the renderbuffer.
- *
- * It is safe to call this function on a renderbuffer without HiZ. In that
- * case, the function is a no-op.
- *
- * \return false if no resolve was needed
- */
-bool
-intel_renderbuffer_resolve_depth(struct brw_context *brw,
-				 struct intel_renderbuffer *irb);
 
 void intel_renderbuffer_move_to_temp(struct brw_context *brw,
                                      struct intel_renderbuffer *irb,
@@ -238,8 +209,8 @@ intel_renderbuffer_upsample(struct brw_context *brw,
                             struct intel_renderbuffer *irb);
 
 void brw_render_cache_set_clear(struct brw_context *brw);
-void brw_render_cache_set_add_bo(struct brw_context *brw, drm_intel_bo *bo);
-void brw_render_cache_set_check_flush(struct brw_context *brw, drm_intel_bo *bo);
+void brw_render_cache_set_add_bo(struct brw_context *brw, struct brw_bo *bo);
+void brw_render_cache_set_check_flush(struct brw_context *brw, struct brw_bo *bo);
 
 unsigned
 intel_quantize_num_samples(struct intel_screen *intel, unsigned num_samples);

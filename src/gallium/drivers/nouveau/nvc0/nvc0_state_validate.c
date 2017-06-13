@@ -1,7 +1,7 @@
 
-#include "util/u_format.h"
 #include "util/u_framebuffer.h"
 #include "util/u_math.h"
+#include "util/u_viewport.h"
 
 #include "nvc0/nvc0_context.h"
 
@@ -74,147 +74,160 @@ nvc0_fb_set_null_rt(struct nouveau_pushbuf *push, unsigned i, unsigned layers)
 static void
 nvc0_validate_fb(struct nvc0_context *nvc0)
 {
-    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
-    struct pipe_framebuffer_state *fb = &nvc0->framebuffer;
-    struct nvc0_screen *screen = nvc0->screen;
-    unsigned i, ms;
-    unsigned ms_mode = NVC0_3D_MULTISAMPLE_MODE_MS1;
-    unsigned nr_cbufs = fb->nr_cbufs;
-    bool serialize = false;
+   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
+   struct pipe_framebuffer_state *fb = &nvc0->framebuffer;
+   struct nvc0_screen *screen = nvc0->screen;
+   unsigned i, ms;
+   unsigned ms_mode = NVC0_3D_MULTISAMPLE_MODE_MS1;
+   unsigned nr_cbufs = fb->nr_cbufs;
+   bool serialize = false;
 
-    nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_FB);
+   nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_FB);
 
-    BEGIN_NVC0(push, NVC0_3D(SCREEN_SCISSOR_HORIZ), 2);
-    PUSH_DATA (push, fb->width << 16);
-    PUSH_DATA (push, fb->height << 16);
+   BEGIN_NVC0(push, NVC0_3D(SCREEN_SCISSOR_HORIZ), 2);
+   PUSH_DATA (push, fb->width << 16);
+   PUSH_DATA (push, fb->height << 16);
 
-    for (i = 0; i < fb->nr_cbufs; ++i) {
-        struct nv50_surface *sf;
-        struct nv04_resource *res;
-        struct nouveau_bo *bo;
+   for (i = 0; i < fb->nr_cbufs; ++i) {
+      struct nv50_surface *sf;
+      struct nv04_resource *res;
+      struct nouveau_bo *bo;
 
-        if (!fb->cbufs[i]) {
-           nvc0_fb_set_null_rt(push, i, 0);
-           continue;
-        }
+      if (!fb->cbufs[i]) {
+         nvc0_fb_set_null_rt(push, i, 0);
+         continue;
+      }
 
-        sf = nv50_surface(fb->cbufs[i]);
-        res = nv04_resource(sf->base.texture);
-        bo = res->bo;
+      sf = nv50_surface(fb->cbufs[i]);
+      res = nv04_resource(sf->base.texture);
+      bo = res->bo;
 
-        BEGIN_NVC0(push, NVC0_3D(RT_ADDRESS_HIGH(i)), 9);
-        PUSH_DATAh(push, res->address + sf->offset);
-        PUSH_DATA (push, res->address + sf->offset);
-        if (likely(nouveau_bo_memtype(bo))) {
-           struct nv50_miptree *mt = nv50_miptree(sf->base.texture);
+      BEGIN_NVC0(push, NVC0_3D(RT_ADDRESS_HIGH(i)), 9);
+      PUSH_DATAh(push, res->address + sf->offset);
+      PUSH_DATA (push, res->address + sf->offset);
+      if (likely(nouveau_bo_memtype(bo))) {
+         struct nv50_miptree *mt = nv50_miptree(sf->base.texture);
 
-           assert(sf->base.texture->target != PIPE_BUFFER);
+         assert(sf->base.texture->target != PIPE_BUFFER);
 
-           PUSH_DATA(push, sf->width);
-           PUSH_DATA(push, sf->height);
-           PUSH_DATA(push, nvc0_format_table[sf->base.format].rt);
-           PUSH_DATA(push, (mt->layout_3d << 16) |
-                    mt->level[sf->base.u.tex.level].tile_mode);
-           PUSH_DATA(push, sf->base.u.tex.first_layer + sf->depth);
-           PUSH_DATA(push, mt->layer_stride >> 2);
-           PUSH_DATA(push, sf->base.u.tex.first_layer);
+         PUSH_DATA(push, sf->width);
+         PUSH_DATA(push, sf->height);
+         PUSH_DATA(push, nvc0_format_table[sf->base.format].rt);
+         PUSH_DATA(push, (mt->layout_3d << 16) |
+                          mt->level[sf->base.u.tex.level].tile_mode);
+         PUSH_DATA(push, sf->base.u.tex.first_layer + sf->depth);
+         PUSH_DATA(push, mt->layer_stride >> 2);
+         PUSH_DATA(push, sf->base.u.tex.first_layer);
 
-           ms_mode = mt->ms_mode;
-        } else {
-           if (res->base.target == PIPE_BUFFER) {
-              PUSH_DATA(push, 262144);
-              PUSH_DATA(push, 1);
-           } else {
-              PUSH_DATA(push, nv50_miptree(sf->base.texture)->level[0].pitch);
-              PUSH_DATA(push, sf->height);
-           }
-           PUSH_DATA(push, nvc0_format_table[sf->base.format].rt);
-           PUSH_DATA(push, 1 << 12);
-           PUSH_DATA(push, 1);
-           PUSH_DATA(push, 0);
-           PUSH_DATA(push, 0);
+         ms_mode = mt->ms_mode;
+      } else {
+         if (res->base.target == PIPE_BUFFER) {
+            PUSH_DATA(push, 262144);
+            PUSH_DATA(push, 1);
+         } else {
+            PUSH_DATA(push, nv50_miptree(sf->base.texture)->level[0].pitch);
+            PUSH_DATA(push, sf->height);
+         }
+         PUSH_DATA(push, nvc0_format_table[sf->base.format].rt);
+         PUSH_DATA(push, 1 << 12);
+         PUSH_DATA(push, 1);
+         PUSH_DATA(push, 0);
+         PUSH_DATA(push, 0);
 
-           nvc0_resource_fence(res, NOUVEAU_BO_WR);
+         nvc0_resource_fence(res, NOUVEAU_BO_WR);
 
-           assert(!fb->zsbuf);
-        }
+         assert(!fb->zsbuf);
+      }
 
-        if (res->status & NOUVEAU_BUFFER_STATUS_GPU_READING)
-           serialize = true;
-        res->status |=  NOUVEAU_BUFFER_STATUS_GPU_WRITING;
-        res->status &= ~NOUVEAU_BUFFER_STATUS_GPU_READING;
+      if (res->status & NOUVEAU_BUFFER_STATUS_GPU_READING)
+         serialize = true;
+      res->status |=  NOUVEAU_BUFFER_STATUS_GPU_WRITING;
+      res->status &= ~NOUVEAU_BUFFER_STATUS_GPU_READING;
 
-        /* only register for writing, otherwise we'd always serialize here */
-        BCTX_REFN(nvc0->bufctx_3d, 3D_FB, res, WR);
-    }
+      /* only register for writing, otherwise we'd always serialize here */
+      BCTX_REFN(nvc0->bufctx_3d, 3D_FB, res, WR);
+   }
 
-    if (fb->zsbuf) {
-        struct nv50_miptree *mt = nv50_miptree(fb->zsbuf->texture);
-        struct nv50_surface *sf = nv50_surface(fb->zsbuf);
-        int unk = mt->base.base.target == PIPE_TEXTURE_2D;
+   if (fb->zsbuf) {
+      struct nv50_miptree *mt = nv50_miptree(fb->zsbuf->texture);
+      struct nv50_surface *sf = nv50_surface(fb->zsbuf);
+      int unk = mt->base.base.target == PIPE_TEXTURE_2D;
 
-        BEGIN_NVC0(push, NVC0_3D(ZETA_ADDRESS_HIGH), 5);
-        PUSH_DATAh(push, mt->base.address + sf->offset);
-        PUSH_DATA (push, mt->base.address + sf->offset);
-        PUSH_DATA (push, nvc0_format_table[fb->zsbuf->format].rt);
-        PUSH_DATA (push, mt->level[sf->base.u.tex.level].tile_mode);
-        PUSH_DATA (push, mt->layer_stride >> 2);
-        BEGIN_NVC0(push, NVC0_3D(ZETA_ENABLE), 1);
-        PUSH_DATA (push, 1);
-        BEGIN_NVC0(push, NVC0_3D(ZETA_HORIZ), 3);
-        PUSH_DATA (push, sf->width);
-        PUSH_DATA (push, sf->height);
-        PUSH_DATA (push, (unk << 16) |
-                   (sf->base.u.tex.first_layer + sf->depth));
-        BEGIN_NVC0(push, NVC0_3D(ZETA_BASE_LAYER), 1);
-        PUSH_DATA (push, sf->base.u.tex.first_layer);
+      BEGIN_NVC0(push, NVC0_3D(ZETA_ADDRESS_HIGH), 5);
+      PUSH_DATAh(push, mt->base.address + sf->offset);
+      PUSH_DATA (push, mt->base.address + sf->offset);
+      PUSH_DATA (push, nvc0_format_table[fb->zsbuf->format].rt);
+      PUSH_DATA (push, mt->level[sf->base.u.tex.level].tile_mode);
+      PUSH_DATA (push, mt->layer_stride >> 2);
+      BEGIN_NVC0(push, NVC0_3D(ZETA_ENABLE), 1);
+      PUSH_DATA (push, 1);
+      BEGIN_NVC0(push, NVC0_3D(ZETA_HORIZ), 3);
+      PUSH_DATA (push, sf->width);
+      PUSH_DATA (push, sf->height);
+      PUSH_DATA (push, (unk << 16) |
+                (sf->base.u.tex.first_layer + sf->depth));
+      BEGIN_NVC0(push, NVC0_3D(ZETA_BASE_LAYER), 1);
+      PUSH_DATA (push, sf->base.u.tex.first_layer);
 
-        ms_mode = mt->ms_mode;
+      ms_mode = mt->ms_mode;
 
-        if (mt->base.status & NOUVEAU_BUFFER_STATUS_GPU_READING)
-           serialize = true;
-        mt->base.status |=  NOUVEAU_BUFFER_STATUS_GPU_WRITING;
-        mt->base.status &= ~NOUVEAU_BUFFER_STATUS_GPU_READING;
+      if (mt->base.status & NOUVEAU_BUFFER_STATUS_GPU_READING)
+         serialize = true;
+      mt->base.status |=  NOUVEAU_BUFFER_STATUS_GPU_WRITING;
+      mt->base.status &= ~NOUVEAU_BUFFER_STATUS_GPU_READING;
 
-        BCTX_REFN(nvc0->bufctx_3d, 3D_FB, &mt->base, WR);
-    } else {
-        BEGIN_NVC0(push, NVC0_3D(ZETA_ENABLE), 1);
-        PUSH_DATA (push, 0);
-    }
+      BCTX_REFN(nvc0->bufctx_3d, 3D_FB, &mt->base, WR);
+   } else {
+       BEGIN_NVC0(push, NVC0_3D(ZETA_ENABLE), 1);
+      PUSH_DATA (push, 0);
+   }
 
-    if (nr_cbufs == 0 && !fb->zsbuf) {
-       assert(util_is_power_of_two(fb->samples));
-       assert(fb->samples <= 8);
+   if (nr_cbufs == 0 && !fb->zsbuf) {
+      assert(util_is_power_of_two(fb->samples));
+      assert(fb->samples <= 8);
 
-       nvc0_fb_set_null_rt(push, 0, fb->layers);
+      nvc0_fb_set_null_rt(push, 0, fb->layers);
 
-       if (fb->samples > 1)
-          ms_mode = ffs(fb->samples) - 1;
-       nr_cbufs = 1;
-    }
+      if (fb->samples > 1)
+         ms_mode = ffs(fb->samples) - 1;
+      nr_cbufs = 1;
+   }
 
-    BEGIN_NVC0(push, NVC0_3D(RT_CONTROL), 1);
-    PUSH_DATA (push, (076543210 << 4) | nr_cbufs);
-    IMMED_NVC0(push, NVC0_3D(MULTISAMPLE_MODE), ms_mode);
+   BEGIN_NVC0(push, NVC0_3D(RT_CONTROL), 1);
+   PUSH_DATA (push, (076543210 << 4) | nr_cbufs);
+   IMMED_NVC0(push, NVC0_3D(MULTISAMPLE_MODE), ms_mode);
 
-    ms = 1 << ms_mode;
-    BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
-    PUSH_DATA (push, 2048);
-    PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
-    PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
-    BEGIN_1IC0(push, NVC0_3D(CB_POS), 1 + 2 * ms);
-    PUSH_DATA (push, NVC0_CB_AUX_SAMPLE_INFO);
-    for (i = 0; i < ms; i++) {
-       float xy[2];
-       nvc0->base.pipe.get_sample_position(&nvc0->base.pipe, ms, i, xy);
-       PUSH_DATAf(push, xy[0]);
-       PUSH_DATAf(push, xy[1]);
-    }
+   ms = 1 << ms_mode;
+   BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
+   PUSH_DATA (push, NVC0_CB_AUX_SIZE);
+   PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
+   PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
+   BEGIN_1IC0(push, NVC0_3D(CB_POS), 1 + 2 * ms);
+   PUSH_DATA (push, NVC0_CB_AUX_SAMPLE_INFO);
+   for (i = 0; i < ms; i++) {
+      float xy[2];
+      nvc0->base.pipe.get_sample_position(&nvc0->base.pipe, ms, i, xy);
+      PUSH_DATAf(push, xy[0]);
+      PUSH_DATAf(push, xy[1]);
+   }
 
-    if (serialize)
-       IMMED_NVC0(push, NVC0_3D(SERIALIZE), 0);
+   if (screen->base.class_3d >= GM200_3D_CLASS) {
+      const uint8_t (*ptr)[2] = nvc0_get_sample_locations(ms);
+      uint32_t val[4] = {};
 
-    NOUVEAU_DRV_STAT(&nvc0->screen->base, gpu_serialize_count, serialize);
+      for (i = 0; i < 16; i++) {
+         val[i / 4] |= ptr[i % ms][0] << (((i % 4) * 8) + 0);
+         val[i / 4] |= ptr[i % ms][1] << (((i % 4) * 8) + 4);
+      }
+
+      BEGIN_NVC0(push, SUBC_3D(0x11e0), 4);
+      PUSH_DATAp(push, val, 4);
+   }
+
+   if (serialize)
+      IMMED_NVC0(push, NVC0_3D(SERIALIZE), 0);
+
+   NOUVEAU_DRV_STAT(&nvc0->screen->base, gpu_serialize_count, serialize);
 }
 
 static void
@@ -316,8 +329,12 @@ nvc0_validate_viewport(struct nvc0_context *nvc0)
       PUSH_DATA (push, (w << 16) | x);
       PUSH_DATA (push, (h << 16) | y);
 
-      zmin = vp->translate[2] - fabsf(vp->scale[2]);
-      zmax = vp->translate[2] + fabsf(vp->scale[2]);
+      /* If the halfz setting ever changes, the viewports will also get
+       * updated. The rast will get updated before the validate function has a
+       * chance to hit, so we can just use it directly without an atom
+       * dependency.
+       */
+      util_viewport_zmin_zmax(vp, nvc0->rast->pipe.clip_halfz, &zmin, &zmax);
 
       BEGIN_NVC0(push, NVC0_3D(DEPTH_RANGE_NEAR(i)), 2);
       PUSH_DATAf(push, zmin);
@@ -357,7 +374,7 @@ nvc0_upload_uclip_planes(struct nvc0_context *nvc0, unsigned s)
    struct nvc0_screen *screen = nvc0->screen;
 
    BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
-   PUSH_DATA (push, 2048);
+   PUSH_DATA (push, NVC0_CB_AUX_SIZE);
    PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s));
    PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s));
    BEGIN_1IC0(push, NVC0_3D(CB_POS), PIPE_MAX_CLIP_PLANES * 4 + 1);
@@ -527,7 +544,7 @@ nvc0_validate_buffers(struct nvc0_context *nvc0)
 
    for (s = 0; s < 5; s++) {
       BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
-      PUSH_DATA (push, 2048);
+      PUSH_DATA (push, NVC0_CB_AUX_SIZE);
       PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s));
       PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(s));
       BEGIN_1IC0(push, NVC0_3D(CB_POS), 1 + 4 * NVC0_MAX_BUFFERS);
@@ -543,6 +560,7 @@ nvc0_validate_buffers(struct nvc0_context *nvc0)
             BCTX_REFN(nvc0->bufctx_3d, 3D_BUF, res, RDWR);
             util_range_add(&res->valid_buffer_range,
                            nvc0->buffers[s][i].buffer_offset,
+                           nvc0->buffers[s][i].buffer_offset +
                            nvc0->buffers[s][i].buffer_size);
          } else {
             PUSH_DATA (push, 0);
@@ -586,7 +604,10 @@ nvc0_validate_min_samples(struct nvc0_context *nvc0)
       // If we're using the incoming sample mask and doing sample shading, we
       // have to do sample shading "to the max", otherwise there's no way to
       // tell which sets of samples are covered by the current invocation.
-      if (nvc0->fragprog->fp.sample_mask_in)
+      // Similarly for reading the framebuffer.
+      if (nvc0->fragprog && (
+                nvc0->fragprog->fp.sample_mask_in ||
+                nvc0->fragprog->fp.reads_framebuffer))
          samples = util_framebuffer_get_num_samples(&nvc0->framebuffer);
       samples |= NVC0_3D_SAMPLE_SHADING_ENABLE;
    }
@@ -603,7 +624,7 @@ nvc0_validate_driverconst(struct nvc0_context *nvc0)
 
    for (i = 0; i < 5; ++i) {
       BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
-      PUSH_DATA (push, 2048);
+      PUSH_DATA (push, NVC0_CB_AUX_SIZE);
       PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(i));
       PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(i));
       BEGIN_NVC0(push, NVC0_3D(CB_BIND(i)), 1);
@@ -653,25 +674,6 @@ nvc0_validate_zsa_fb(struct nvc0_context *nvc0)
 }
 
 static void
-nvc0_validate_blend_fb(struct nvc0_context *nvc0)
-{
-   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
-   struct pipe_framebuffer_state *fb = &nvc0->framebuffer;
-   uint32_t ms = 0;
-
-   if ((!fb->nr_cbufs || !fb->cbufs[0] ||
-        !util_format_is_pure_integer(fb->cbufs[0]->format)) && nvc0->blend) {
-      if (nvc0->blend->pipe.alpha_to_coverage)
-         ms |= NVC0_3D_MULTISAMPLE_CTRL_ALPHA_TO_COVERAGE;
-      if (nvc0->blend->pipe.alpha_to_one)
-         ms |= NVC0_3D_MULTISAMPLE_CTRL_ALPHA_TO_ONE;
-   }
-
-   BEGIN_NVC0(push, NVC0_3D(MULTISAMPLE_CTRL), 1);
-   PUSH_DATA (push, ms);
-}
-
-static void
 nvc0_validate_rast_fb(struct nvc0_context *nvc0)
 {
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
@@ -699,6 +701,93 @@ nvc0_validate_tess_state(struct nvc0_context *nvc0)
    BEGIN_NVC0(push, NVC0_3D(TESS_LEVEL_OUTER(0)), 6);
    PUSH_DATAp(push, nvc0->default_tess_outer, 4);
    PUSH_DATAp(push, nvc0->default_tess_inner, 2);
+}
+
+/* If we have a frag shader bound which tries to read from the framebuffer, we
+ * have to make sure that the fb is bound as a texture in the expected
+ * location. For Fermi, that's in the special driver slot 16, while for Kepler
+ * it's a regular binding stored in the driver constbuf.
+ */
+static void
+nvc0_validate_fbread(struct nvc0_context *nvc0)
+{
+   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
+   struct nvc0_screen *screen = nvc0->screen;
+   struct pipe_context *pipe = &nvc0->base.pipe;
+   struct pipe_sampler_view *old_view = nvc0->fbtexture;
+   struct pipe_sampler_view *new_view = NULL;
+
+   if (nvc0->fragprog &&
+       nvc0->fragprog->fp.reads_framebuffer &&
+       nvc0->framebuffer.nr_cbufs &&
+       nvc0->framebuffer.cbufs[0]) {
+      struct pipe_sampler_view tmpl;
+      struct pipe_surface *sf = nvc0->framebuffer.cbufs[0];
+
+      tmpl.target = PIPE_TEXTURE_2D_ARRAY;
+      tmpl.format = sf->format;
+      tmpl.u.tex.first_level = tmpl.u.tex.last_level = sf->u.tex.level;
+      tmpl.u.tex.first_layer = sf->u.tex.first_layer;
+      tmpl.u.tex.last_layer = sf->u.tex.last_layer;
+      tmpl.swizzle_r = PIPE_SWIZZLE_X;
+      tmpl.swizzle_g = PIPE_SWIZZLE_Y;
+      tmpl.swizzle_b = PIPE_SWIZZLE_Z;
+      tmpl.swizzle_a = PIPE_SWIZZLE_W;
+
+      /* Bail if it's the same parameters */
+      if (old_view && old_view->texture == sf->texture &&
+          old_view->format == sf->format &&
+          old_view->u.tex.first_level == sf->u.tex.level &&
+          old_view->u.tex.first_layer == sf->u.tex.first_layer &&
+          old_view->u.tex.last_layer == sf->u.tex.last_layer)
+         return;
+
+      new_view = pipe->create_sampler_view(pipe, sf->texture, &tmpl);
+   } else if (old_view == NULL) {
+      return;
+   }
+
+   if (old_view)
+      pipe_sampler_view_reference(&nvc0->fbtexture, NULL);
+   nvc0->fbtexture = new_view;
+
+   if (screen->default_tsc->id < 0) {
+      struct nv50_tsc_entry *tsc = nv50_tsc_entry(screen->default_tsc);
+      tsc->id = nvc0_screen_tsc_alloc(screen, tsc);
+      nvc0->base.push_data(&nvc0->base, screen->txc, 65536 + tsc->id * 32,
+                           NV_VRAM_DOMAIN(&screen->base), 32, tsc->tsc);
+      screen->tsc.lock[tsc->id / 32] |= 1 << (tsc->id % 32);
+
+      IMMED_NVC0(push, NVC0_3D(TSC_FLUSH), 0);
+      if (screen->base.class_3d < NVE4_3D_CLASS) {
+         BEGIN_NVC0(push, NVC0_3D(BIND_TSC2(0)), 1);
+         PUSH_DATA (push, (tsc->id << 12) | 1);
+      }
+   }
+
+   if (new_view) {
+      struct nv50_tic_entry *tic = nv50_tic_entry(new_view);
+      assert(tic->id < 0);
+      tic->id = nvc0_screen_tic_alloc(screen, tic);
+      nvc0->base.push_data(&nvc0->base, screen->txc, tic->id * 32,
+                           NV_VRAM_DOMAIN(&screen->base), 32, tic->tic);
+      screen->tic.lock[tic->id / 32] |= 1 << (tic->id % 32);
+
+      if (screen->base.class_3d >= NVE4_3D_CLASS) {
+         BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
+         PUSH_DATA (push, NVC0_CB_AUX_SIZE);
+         PUSH_DATAh(push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
+         PUSH_DATA (push, screen->uniform_bo->offset + NVC0_CB_AUX_INFO(4));
+         BEGIN_1IC0(push, NVC0_3D(CB_POS), 1 + 1);
+         PUSH_DATA (push, NVC0_CB_AUX_FB_TEX_INFO);
+         PUSH_DATA (push, (screen->default_tsc->id << 20) | tic->id);
+      } else {
+         BEGIN_NVC0(push, NVC0_3D(BIND_TIC2(0)), 1);
+         PUSH_DATA (push, (tic->id << 9) | 1);
+      }
+
+      IMMED_NVC0(push, NVC0_3D(TIC_FLUSH), 0);
+   }
 }
 
 static void
@@ -730,8 +819,6 @@ nvc0_switch_pipe_context(struct nvc0_context *ctx_to)
 
    if (!ctx_to->vertex)
       ctx_to->dirty_3d &= ~(NVC0_NEW_3D_VERTEX | NVC0_NEW_3D_ARRAYS);
-   if (!ctx_to->idxbuf.buffer)
-      ctx_to->dirty_3d &= ~NVC0_NEW_3D_IDXBUF;
 
    if (!ctx_to->vertprog)
       ctx_to->dirty_3d &= ~NVC0_NEW_3D_VERTPROG;
@@ -773,7 +860,6 @@ validate_list_3d[] = {
     { nvc0_validate_fp_zsa_rast,   NVC0_NEW_3D_FRAGPROG | NVC0_NEW_3D_ZSA |
                                    NVC0_NEW_3D_RASTERIZER },
     { nvc0_validate_zsa_fb,        NVC0_NEW_3D_ZSA | NVC0_NEW_3D_FRAMEBUFFER },
-    { nvc0_validate_blend_fb,      NVC0_NEW_3D_BLEND | NVC0_NEW_3D_FRAMEBUFFER },
     { nvc0_validate_rast_fb,       NVC0_NEW_3D_RASTERIZER | NVC0_NEW_3D_FRAMEBUFFER },
     { nvc0_validate_clip,          NVC0_NEW_3D_CLIP | NVC0_NEW_3D_RASTERIZER |
                                    NVC0_NEW_3D_VERTPROG |
@@ -783,11 +869,15 @@ validate_list_3d[] = {
     { nvc0_validate_textures,      NVC0_NEW_3D_TEXTURES },
     { nvc0_validate_samplers,      NVC0_NEW_3D_SAMPLERS },
     { nve4_set_tex_handles,        NVC0_NEW_3D_TEXTURES | NVC0_NEW_3D_SAMPLERS },
+    { nvc0_validate_fbread,        NVC0_NEW_3D_FRAGPROG |
+                                   NVC0_NEW_3D_FRAMEBUFFER },
     { nvc0_vertex_arrays_validate, NVC0_NEW_3D_VERTEX | NVC0_NEW_3D_ARRAYS },
     { nvc0_validate_surfaces,      NVC0_NEW_3D_SURFACES },
     { nvc0_validate_buffers,       NVC0_NEW_3D_BUFFERS },
-    { nvc0_idxbuf_validate,        NVC0_NEW_3D_IDXBUF },
     { nvc0_tfb_validate,           NVC0_NEW_3D_TFB_TARGETS | NVC0_NEW_3D_GMTYPROG },
+    { nvc0_layer_validate,         NVC0_NEW_3D_VERTPROG |
+                                   NVC0_NEW_3D_TEVLPROG |
+                                   NVC0_NEW_3D_GMTYPROG },
     { nvc0_validate_driverconst,   NVC0_NEW_3D_DRIVERCONST },
 };
 

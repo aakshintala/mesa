@@ -277,7 +277,8 @@ nv50_clear_render_target(struct pipe_context *pipe,
                          struct pipe_surface *dst,
                          const union pipe_color_union *color,
                          unsigned dstx, unsigned dsty,
-                         unsigned width, unsigned height)
+                         unsigned width, unsigned height,
+                         bool render_condition_enabled)
 {
    struct nv50_context *nv50 = nv50_context(pipe);
    struct nouveau_pushbuf *push = nv50->base.pushbuf;
@@ -294,7 +295,7 @@ nv50_clear_render_target(struct pipe_context *pipe,
    PUSH_DATAf(push, color->f[2]);
    PUSH_DATAf(push, color->f[3]);
 
-   if (nouveau_pushbuf_space(push, 32 + sf->depth, 1, 0))
+   if (nouveau_pushbuf_space(push, 64 + sf->depth, 1, 0))
       return;
 
    PUSH_REFN(push, bo, mt->base.domain | NOUVEAU_BO_WR);
@@ -341,8 +342,10 @@ nv50_clear_render_target(struct pipe_context *pipe,
    PUSH_DATA (push, (width << 16) | dstx);
    PUSH_DATA (push, (height << 16) | dsty);
 
-   BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
-   PUSH_DATA (push, NV50_3D_COND_MODE_ALWAYS);
+   if (!render_condition_enabled) {
+      BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
+      PUSH_DATA (push, NV50_3D_COND_MODE_ALWAYS);
+   }
 
    BEGIN_NI04(push, NV50_3D(CLEAR_BUFFERS), sf->depth);
    for (z = 0; z < sf->depth; ++z) {
@@ -350,8 +353,10 @@ nv50_clear_render_target(struct pipe_context *pipe,
                  (z << NV50_3D_CLEAR_BUFFERS_LAYER__SHIFT));
    }
 
-   BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
-   PUSH_DATA (push, nv50->cond_condmode);
+   if (!render_condition_enabled) {
+      BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
+      PUSH_DATA (push, nv50->cond_condmode);
+   }
 
    nv50->dirty_3d |= NV50_NEW_3D_FRAMEBUFFER | NV50_NEW_3D_SCISSOR;
 }
@@ -363,7 +368,8 @@ nv50_clear_depth_stencil(struct pipe_context *pipe,
                          double depth,
                          unsigned stencil,
                          unsigned dstx, unsigned dsty,
-                         unsigned width, unsigned height)
+                         unsigned width, unsigned height,
+                         bool render_condition_enabled)
 {
    struct nv50_context *nv50 = nv50_context(pipe);
    struct nouveau_pushbuf *push = nv50->base.pushbuf;
@@ -388,7 +394,7 @@ nv50_clear_depth_stencil(struct pipe_context *pipe,
       mode |= NV50_3D_CLEAR_BUFFERS_S;
    }
 
-   if (nouveau_pushbuf_space(push, 32 + sf->depth, 1, 0))
+   if (nouveau_pushbuf_space(push, 64 + sf->depth, 1, 0))
       return;
 
    PUSH_REFN(push, bo, mt->base.domain | NOUVEAU_BO_WR);
@@ -424,8 +430,10 @@ nv50_clear_depth_stencil(struct pipe_context *pipe,
    PUSH_DATA (push, (width << 16) | dstx);
    PUSH_DATA (push, (height << 16) | dsty);
 
-   BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
-   PUSH_DATA (push, NV50_3D_COND_MODE_ALWAYS);
+   if (!render_condition_enabled) {
+      BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
+      PUSH_DATA (push, NV50_3D_COND_MODE_ALWAYS);
+   }
 
    BEGIN_NI04(push, NV50_3D(CLEAR_BUFFERS), sf->depth);
    for (z = 0; z < sf->depth; ++z) {
@@ -433,8 +441,10 @@ nv50_clear_depth_stencil(struct pipe_context *pipe,
                  (z << NV50_3D_CLEAR_BUFFERS_LAYER__SHIFT));
    }
 
-   BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
-   PUSH_DATA (push, nv50->cond_condmode);
+   if (!render_condition_enabled) {
+      BEGIN_NV04(push, NV50_3D(COND_MODE), 1);
+      PUSH_DATA (push, nv50->cond_condmode);
+   }
 
    nv50->dirty_3d |= NV50_NEW_3D_FRAMEBUFFER | NV50_NEW_3D_SCISSOR;
 }
@@ -472,7 +482,7 @@ nv50_clear_texture(struct pipe_context *pipe,
          desc->unpack_s_8uint(&stencil, 0, data, 0, 1, 1);
       }
       pipe->clear_depth_stencil(pipe, sf, clear, depth, stencil,
-                                box->x, box->y, box->width, box->height);
+                                box->x, box->y, box->width, box->height, false);
    } else {
       union pipe_color_union color;
 
@@ -508,7 +518,7 @@ nv50_clear_texture(struct pipe_context *pipe,
       }
 
       pipe->clear_render_target(pipe, sf, &color,
-                                box->x, box->y, box->width, box->height);
+                                box->x, box->y, box->width, box->height, false);
    }
    pipe->surface_destroy(pipe, sf);
 }
@@ -742,7 +752,7 @@ nv50_clear_buffer(struct pipe_context *pipe,
    PUSH_DATAf(push, color.f[2]);
    PUSH_DATAf(push, color.f[3]);
 
-   if (nouveau_pushbuf_space(push, 32, 1, 0))
+   if (nouveau_pushbuf_space(push, 64, 1, 0))
       return;
 
    PUSH_REFN(push, buf->bo, buf->domain | NOUVEAU_BO_WR);
@@ -811,7 +821,7 @@ struct nv50_blitter
 
    struct nv50_tsc_entry sampler[2]; /* nearest, bilinear */
 
-   pipe_mutex mutex;
+   mtx_t mutex;
 };
 
 struct nv50_blitctx
@@ -1068,11 +1078,11 @@ nv50_blit_select_fp(struct nv50_blitctx *ctx, const struct pipe_blit_info *info)
    const unsigned mode = ctx->mode;
 
    if (!blitter->fp[targ][mode]) {
-      pipe_mutex_lock(blitter->mutex);
+      mtx_lock(&blitter->mutex);
       if (!blitter->fp[targ][mode])
          blitter->fp[targ][mode] =
             nv50_blitter_make_fp(&ctx->nv50->base.pipe, mode, ptarg);
-      pipe_mutex_unlock(blitter->mutex);
+      mtx_unlock(&blitter->mutex);
    }
    ctx->fp = blitter->fp[targ][mode];
 }
@@ -1745,7 +1755,7 @@ nv50_blitter_create(struct nv50_screen *screen)
       return false;
    }
 
-   pipe_mutex_init(screen->blitter->mutex);
+   (void) mtx_init(&screen->blitter->mutex, mtx_plain);
 
    nv50_blitter_make_vp(screen->blitter);
    nv50_blitter_make_sampler(screen->blitter);
@@ -1770,7 +1780,7 @@ nv50_blitter_destroy(struct nv50_screen *screen)
       }
    }
 
-   pipe_mutex_destroy(blitter->mutex);
+   mtx_destroy(&blitter->mutex);
    FREE(blitter);
 }
 

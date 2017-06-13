@@ -1,5 +1,5 @@
 /****************************************************************************
-* Copyright (C) 2014-2015 Intel Corporation.   All Rights Reserved.
+* Copyright (C) 2014-2017 Intel Corporation.   All Rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,17 +30,37 @@
 #if (defined(FORCE_WINDOWS) || defined(_WIN32)) && !defined(FORCE_LINUX)
 
 #define SWR_API __cdecl
+#define SWR_VISIBLE
 
 #ifndef NOMINMAX
 #define NOMINMAX
-#endif
 #include <windows.h>
+#undef NOMINMAX
+#else
+#include <windows.h>
+#endif
 #include <intrin.h>
 #include <cstdint>
 
+#if defined(MemoryFence)
+// Windows.h defines MemoryFence as _mm_mfence, but this conflicts with llvm::sys::MemoryFence
+#undef MemoryFence
+#endif
+
 #define OSALIGN(RWORD, WIDTH) __declspec(align(WIDTH)) RWORD
-#define THREAD __declspec(thread)
+
+#if defined(_DEBUG)
+// We compile Debug builds with inline function expansion enabled.  This allows
+// functions compiled with __forceinline to be inlined even in Debug builds.
+// The inline_depth(0) pragma below will disable inline function expansion for
+// normal INLINE / inline functions, but not for __forceinline functions.
+// Our SIMD function wrappers (see simdlib.hpp) use __forceinline even in
+// Debug builds.
+#define INLINE inline
+#pragma inline_depth(0)
+#else
 #define INLINE __forceinline
+#endif
 #define DEBUGBREAK __debugbreak()
 
 #define PRAGMA_WARNING_PUSH_DISABLE(...) \
@@ -72,6 +92,7 @@ static inline void AlignedFree(void* p)
 #elif defined(__APPLE__) || defined(FORCE_LINUX) || defined(__linux__) || defined(__gnu_linux__)
 
 #define SWR_API
+#define SWR_VISIBLE __attribute__((visibility("default")))
 
 #include <stdlib.h>
 #include <string.h>
@@ -100,19 +121,34 @@ typedef unsigned int    DWORD;
 #define MAX_PATH PATH_MAX
 
 #define OSALIGN(RWORD, WIDTH) RWORD __attribute__((aligned(WIDTH)))
-#define THREAD __thread
 #ifndef INLINE
 #define INLINE __inline
 #endif
 #define DEBUGBREAK asm ("int $3")
+
 #if !defined(__CYGWIN__)
+
 #ifndef __cdecl
 #define __cdecl
 #endif
 #ifndef __stdcall
 #define __stdcall
 #endif
-#define __declspec(X)
+
+#if defined(__GNUC__) && !defined(__INTEL_COMPILER)
+    #define __declspec(x)           __declspec_##x
+    #define __declspec_align(y)     __attribute__((aligned(y)))
+    #define __declspec_deprecated   __attribute__((deprecated))
+    #define __declspec_dllexport
+    #define __declspec_dllimport
+    #define __declspec_noinline     __attribute__((__noinline__))
+    #define __declspec_nothrow      __attribute__((nothrow))
+    #define __declspec_novtable
+    #define __declspec_thread       __thread
+#else
+    #define __declspec(X)
+#endif
+
 #endif
 
 #define GCC_VERSION (__GNUC__ * 10000 \
@@ -195,15 +231,16 @@ void AlignedFree(void* p)
 #define sprintf_s sprintf
 #define strcpy_s(dst,size,src) strncpy(dst,src,size)
 #define GetCurrentProcessId getpid
+pid_t gettid(void);
 #define GetCurrentThreadId gettid
-
-#define CreateDirectory(name, pSecurity) mkdir(name, 0777)
 
 #define InterlockedCompareExchange(Dest, Exchange, Comparand) __sync_val_compare_and_swap(Dest, Comparand, Exchange)
 #define InterlockedExchangeAdd(Addend, Value) __sync_fetch_and_add(Addend, Value)
 #define InterlockedDecrement(Append) __sync_sub_and_fetch(Append, 1)
 #define InterlockedDecrement64(Append) __sync_sub_and_fetch(Append, 1)
 #define InterlockedIncrement(Append) __sync_add_and_fetch(Append, 1)
+#define InterlockedAdd(Addend, Value) __sync_add_and_fetch(Addend, Value)
+#define InterlockedAdd64(Addend, Value) __sync_add_and_fetch(Addend, Value)
 #define _ReadWriteBarrier() asm volatile("" ::: "memory")
 
 #define PRAGMA_WARNING_PUSH_DISABLE(...)
@@ -215,6 +252,8 @@ void AlignedFree(void* p)
 
 #endif
 
+#define THREAD thread_local
+
 // Universal types
 typedef uint8_t     KILOBYTE[1024];
 typedef KILOBYTE    MEGABYTE[1024];
@@ -222,7 +261,24 @@ typedef MEGABYTE    GIGABYTE[1024];
 
 #define OSALIGNLINE(RWORD) OSALIGN(RWORD, 64)
 #define OSALIGNSIMD(RWORD) OSALIGN(RWORD, KNOB_SIMD_BYTES)
+#if ENABLE_AVX512_SIMD16
+#define OSALIGNSIMD16(RWORD) OSALIGN(RWORD, KNOB_SIMD16_BYTES)
+#endif
 
 #include "common/swr_assert.h"
+
+#ifdef __GNUC__
+#define ATTR_UNUSED __attribute__((unused))
+#else
+#define ATTR_UNUSED
+#endif
+
+#define SWR_FUNC(_retType, _funcName, /* args */...)   \
+   typedef _retType (SWR_API * PFN##_funcName)(__VA_ARGS__); \
+  _retType SWR_API _funcName(__VA_ARGS__);
+
+// Defined in os.cpp
+void SWR_API SetCurrentThreadName(const char* pThreadName);
+void SWR_API CreateDirectoryPath(const std::string& path);
 
 #endif//__SWR_OS_H__

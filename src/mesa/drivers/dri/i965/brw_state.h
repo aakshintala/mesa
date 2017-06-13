@@ -34,7 +34,6 @@
 #define BRW_STATE_H
 
 #include "brw_context.h"
-#include "brw_defines.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +42,6 @@ extern "C" {
 enum intel_msaa_layout;
 
 extern const struct brw_tracked_state brw_blend_constant_color;
-extern const struct brw_tracked_state brw_cc_vp;
 extern const struct brw_tracked_state brw_cc_unit;
 extern const struct brw_tracked_state brw_clip_unit;
 extern const struct brw_tracked_state brw_vs_pull_constants;
@@ -57,12 +55,8 @@ extern const struct brw_tracked_state brw_curbe_offsets;
 extern const struct brw_tracked_state brw_invariant_state;
 extern const struct brw_tracked_state brw_fs_samplers;
 extern const struct brw_tracked_state brw_gs_unit;
-extern const struct brw_tracked_state brw_line_stipple;
-extern const struct brw_tracked_state brw_aa_line_parameters;
 extern const struct brw_tracked_state brw_binding_table_pointers;
 extern const struct brw_tracked_state brw_depthbuffer;
-extern const struct brw_tracked_state brw_polygon_stipple_offset;
-extern const struct brw_tracked_state brw_polygon_stipple;
 extern const struct brw_tracked_state brw_recalculate_urb_fence;
 extern const struct brw_tracked_state brw_sf_unit;
 extern const struct brw_tracked_state brw_sf_vp;
@@ -84,8 +78,8 @@ extern const struct brw_tracked_state brw_tes_image_surfaces;
 extern const struct brw_tracked_state brw_gs_ubo_surfaces;
 extern const struct brw_tracked_state brw_gs_abo_surfaces;
 extern const struct brw_tracked_state brw_gs_image_surfaces;
-extern const struct brw_tracked_state brw_vs_unit;
 extern const struct brw_tracked_state brw_renderbuffer_surfaces;
+extern const struct brw_tracked_state brw_renderbuffer_read_surfaces;
 extern const struct brw_tracked_state brw_texture_surfaces;
 extern const struct brw_tracked_state brw_wm_binding_table;
 extern const struct brw_tracked_state brw_gs_binding_table;
@@ -102,74 +96,21 @@ extern const struct brw_tracked_state brw_wm_unit;
 
 extern const struct brw_tracked_state brw_psp_urb_cbs;
 
-extern const struct brw_tracked_state brw_drawing_rect;
 extern const struct brw_tracked_state brw_indices;
-extern const struct brw_tracked_state brw_vertices;
 extern const struct brw_tracked_state brw_index_buffer;
-extern const struct brw_tracked_state brw_cs_state;
 extern const struct brw_tracked_state gen7_cs_push_constants;
 extern const struct brw_tracked_state gen6_binding_table_pointers;
-extern const struct brw_tracked_state gen6_blend_state;
-extern const struct brw_tracked_state gen6_clip_state;
-extern const struct brw_tracked_state gen6_clip_vp;
-extern const struct brw_tracked_state gen6_color_calc_state;
-extern const struct brw_tracked_state gen6_depth_stencil_state;
-extern const struct brw_tracked_state gen6_gs_state;
-extern const struct brw_tracked_state gen6_gs_push_constants;
 extern const struct brw_tracked_state gen6_gs_binding_table;
-extern const struct brw_tracked_state gen6_multisample_state;
 extern const struct brw_tracked_state gen6_renderbuffer_surfaces;
 extern const struct brw_tracked_state gen6_sampler_state;
-extern const struct brw_tracked_state gen6_scissor_state;
 extern const struct brw_tracked_state gen6_sol_surface;
-extern const struct brw_tracked_state gen6_sf_state;
 extern const struct brw_tracked_state gen6_sf_vp;
 extern const struct brw_tracked_state gen6_urb;
-extern const struct brw_tracked_state gen6_viewport_state;
-extern const struct brw_tracked_state gen6_vs_push_constants;
-extern const struct brw_tracked_state gen6_vs_state;
-extern const struct brw_tracked_state gen6_wm_push_constants;
-extern const struct brw_tracked_state gen6_wm_state;
 extern const struct brw_tracked_state gen7_depthbuffer;
-extern const struct brw_tracked_state gen7_clip_state;
-extern const struct brw_tracked_state gen7_ds_state;
-extern const struct brw_tracked_state gen7_gs_state;
-extern const struct brw_tracked_state gen7_tcs_push_constants;
-extern const struct brw_tracked_state gen7_hs_state;
 extern const struct brw_tracked_state gen7_l3_state;
-extern const struct brw_tracked_state gen7_ps_state;
 extern const struct brw_tracked_state gen7_push_constant_space;
-extern const struct brw_tracked_state gen7_sbe_state;
-extern const struct brw_tracked_state gen7_sf_clip_viewport;
-extern const struct brw_tracked_state gen7_sf_state;
-extern const struct brw_tracked_state gen7_sol_state;
-extern const struct brw_tracked_state gen7_te_state;
-extern const struct brw_tracked_state gen7_tes_push_constants;
 extern const struct brw_tracked_state gen7_urb;
-extern const struct brw_tracked_state gen7_vs_state;
-extern const struct brw_tracked_state gen7_wm_state;
-extern const struct brw_tracked_state gen7_hw_binding_tables;
-extern const struct brw_tracked_state haswell_cut_index;
-extern const struct brw_tracked_state gen8_blend_state;
-extern const struct brw_tracked_state gen8_disable_stages;
-extern const struct brw_tracked_state gen8_ds_state;
-extern const struct brw_tracked_state gen8_gs_state;
-extern const struct brw_tracked_state gen8_hs_state;
-extern const struct brw_tracked_state gen8_index_buffer;
-extern const struct brw_tracked_state gen8_multisample_state;
 extern const struct brw_tracked_state gen8_pma_fix;
-extern const struct brw_tracked_state gen8_ps_blend;
-extern const struct brw_tracked_state gen8_ps_extra;
-extern const struct brw_tracked_state gen8_ps_state;
-extern const struct brw_tracked_state gen8_wm_depth_stencil;
-extern const struct brw_tracked_state gen8_wm_state;
-extern const struct brw_tracked_state gen8_raster_state;
-extern const struct brw_tracked_state gen8_sbe_state;
-extern const struct brw_tracked_state gen8_sf_state;
-extern const struct brw_tracked_state gen8_sf_clip_viewport;
-extern const struct brw_tracked_state gen8_vertices;
-extern const struct brw_tracked_state gen8_vf_topology;
-extern const struct brw_tracked_state gen8_vs_state;
 extern const struct brw_tracked_state brw_cs_work_groups_surface;
 
 static inline bool
@@ -190,6 +131,9 @@ void brw_upload_binding_table(struct brw_context *brw,
 void brw_upload_invariant_state(struct brw_context *brw);
 uint32_t
 brw_depthbuffer_format(struct brw_context *brw);
+
+uint32_t
+brw_convert_depth_value(mesa_format format, float value);
 
 void brw_upload_state_base_address(struct brw_context *brw);
 
@@ -220,28 +164,35 @@ brw_select_pipeline(struct brw_context *brw, enum brw_pipeline pipeline)
 }
 
 /***********************************************************************
- * brw_state_cache.c
+ * brw_program_cache.c
  */
 
 void brw_upload_cache(struct brw_cache *cache,
-		      enum brw_cache_id cache_id,
-		      const void *key,
-		      GLuint key_sz,
-		      const void *data,
-		      GLuint data_sz,
-		      const void *aux,
-		      GLuint aux_sz,
-		      uint32_t *out_offset, void *out_aux);
+                      enum brw_cache_id cache_id,
+                      const void *key,
+                      GLuint key_sz,
+                      const void *data,
+                      GLuint data_sz,
+                      const void *aux,
+                      GLuint aux_sz,
+                      uint32_t *out_offset, void *out_aux);
 
 bool brw_search_cache(struct brw_cache *cache,
-		      enum brw_cache_id cache_id,
-		      const void *key,
-		      GLuint key_size,
-		      uint32_t *inout_offset, void *inout_aux);
-void brw_state_cache_check_size( struct brw_context *brw );
+                      enum brw_cache_id cache_id,
+                      const void *key,
+                      GLuint key_size,
+                      uint32_t *inout_offset, void *inout_aux);
+
+const void *brw_find_previous_compile(struct brw_cache *cache,
+                                      enum brw_cache_id cache_id,
+                                      unsigned program_string_id);
+
+void brw_program_cache_check_size(struct brw_context *brw);
 
 void brw_init_caches( struct brw_context *brw );
 void brw_destroy_caches( struct brw_context *brw );
+
+void brw_print_program_cache(struct brw_context *brw);
 
 /***********************************************************************
  * brw_state_batch.c
@@ -249,30 +200,42 @@ void brw_destroy_caches( struct brw_context *brw );
 #define BRW_BATCH_STRUCT(brw, s) \
    intel_batchbuffer_data(brw, (s), sizeof(*(s)), RENDER_RING)
 
-void *__brw_state_batch(struct brw_context *brw,
-                        enum aub_state_struct_type type,
-                        int size,
-                        int alignment,
-                        int index,
-                        uint32_t *out_offset);
-#define brw_state_batch(brw, type, size, alignment, out_offset) \
-   __brw_state_batch(brw, type, size, alignment, 0, out_offset)
+void *brw_state_batch(struct brw_context *brw,
+                      int size, int alignment, uint32_t *out_offset);
+uint32_t brw_state_batch_size(struct brw_context *brw, uint32_t offset);
 
 /* brw_wm_surface_state.c */
 void gen4_init_vtable_surface_functions(struct brw_context *brw);
 uint32_t brw_get_surface_tiling_bits(uint32_t tiling);
 uint32_t brw_get_surface_num_multisamples(unsigned num_samples);
-
-uint32_t brw_format_for_mesa_format(mesa_format mesa_format);
+enum isl_format brw_isl_format_for_mesa_format(mesa_format mesa_format);
 
 GLuint translate_tex_target(GLenum target);
 
-GLuint translate_tex_format(struct brw_context *brw,
-                            mesa_format mesa_format,
-			    GLenum srgb_decode);
+enum isl_format translate_tex_format(struct brw_context *brw,
+                                     mesa_format mesa_format,
+                                     GLenum srgb_decode);
 
 int brw_get_texture_swizzle(const struct gl_context *ctx,
                             const struct gl_texture_object *t);
+
+void brw_emit_buffer_surface_state(struct brw_context *brw,
+                                   uint32_t *out_offset,
+                                   struct brw_bo *bo,
+                                   unsigned buffer_offset,
+                                   unsigned surface_format,
+                                   unsigned buffer_size,
+                                   unsigned pitch,
+                                   bool rw);
+
+void brw_update_texture_surface(struct gl_context *ctx,
+                                unsigned unit, uint32_t *surf_offset,
+                                bool for_gather, uint32_t plane);
+
+uint32_t brw_update_renderbuffer_surface(struct brw_context *brw,
+                                         struct gl_renderbuffer *rb,
+                                         uint32_t flags, unsigned unit,
+                                         uint32_t surf_index);
 
 void brw_update_renderbuffer_surfaces(struct brw_context *brw,
                                       const struct gl_framebuffer *fb,
@@ -280,49 +243,12 @@ void brw_update_renderbuffer_surfaces(struct brw_context *brw,
                                       uint32_t *surf_offset);
 
 /* gen7_wm_surface_state.c */
-uint32_t gen7_surface_tiling_mode(uint32_t tiling);
-uint32_t gen7_surface_msaa_bits(unsigned num_samples, enum intel_msaa_layout l);
-void gen7_set_surface_mcs_info(struct brw_context *brw,
-                               uint32_t *surf,
-                               uint32_t surf_offset,
-                               const struct intel_mipmap_tree *mcs_mt,
-                               bool is_render_target);
 void gen7_check_surface_setup(uint32_t *surf, bool is_render_target);
 void gen7_init_vtable_surface_functions(struct brw_context *brw);
-
-/* gen8_ps_state.c */
-void gen8_upload_ps_state(struct brw_context *brw,
-                          const struct brw_stage_state *stage_state,
-                          const struct brw_wm_prog_data *prog_data,
-                          uint32_t fast_clear_op);
-
-void gen8_upload_ps_extra(struct brw_context *brw,
-                          const struct brw_wm_prog_data *prog_data);
-
-/* gen7_sol_state.c */
-void gen7_upload_3dstate_so_decl_list(struct brw_context *brw,
-                                      const struct brw_vue_map *vue_map);
-void gen8_upload_3dstate_so_buffers(struct brw_context *brw);
 
 /* gen8_surface_state.c */
 
 void gen8_init_vtable_surface_functions(struct brw_context *brw);
-
-unsigned gen8_surface_tiling_mode(uint32_t tiling);
-unsigned gen8_vertical_alignment(const struct brw_context *brw,
-                                 const struct intel_mipmap_tree *mt,
-                                 uint32_t surf_type);
-unsigned gen8_horizontal_alignment(const struct brw_context *brw,
-                                   const struct intel_mipmap_tree *mt,
-                                   uint32_t surf_type);
-uint32_t *gen8_allocate_surface_state(struct brw_context *brw,
-                                      uint32_t *out_offset, int index);
-
-void gen8_emit_fast_clear_color(const struct brw_context *brw,
-                                const struct intel_mipmap_tree *mt,
-                                uint32_t *surf);
-uint32_t gen8_get_aux_mode(const struct brw_context *brw,
-                           const struct intel_mipmap_tree *mt);
 
 /* brw_sampler_state.c */
 void brw_emit_sampler_state(struct brw_context *brw,
@@ -336,40 +262,13 @@ void brw_emit_sampler_state(struct brw_context *brw,
                             unsigned wrap_s,
                             unsigned wrap_t,
                             unsigned wrap_r,
+                            unsigned base_level,
                             unsigned min_lod,
                             unsigned max_lod,
                             int lod_bias,
                             unsigned shadow_function,
                             bool non_normalized_coordinates,
                             uint32_t border_color_offset);
-
-void brw_update_sampler_state(struct brw_context *brw,
-                              GLenum target, bool tex_cube_map_seamless,
-                              GLfloat tex_unit_lod_bias,
-                              mesa_format format, GLenum base_format,
-                              bool is_integer_format,
-                              const struct gl_sampler_object *sampler,
-                              uint32_t *sampler_state,
-                              uint32_t batch_offset_for_sampler_state);
-
-/* gen6_wm_state.c */
-void
-gen6_upload_wm_state(struct brw_context *brw,
-                     const struct brw_wm_prog_data *prog_data,
-                     const struct brw_stage_state *stage_state,
-                     bool multisampled_fbo,
-                     bool dual_source_blend_enable, bool kill_enable,
-                     bool color_buffer_write_enable, bool msaa_enabled,
-                     bool line_stipple_enable, bool polygon_stipple_enable,
-                     bool statistic_enable);
-
-/* gen6_sf_state.c */
-void
-calculate_attr_overrides(const struct brw_context *brw,
-                         uint16_t *attr_overrides,
-                         uint32_t *point_sprite_enables,
-                         uint32_t *urb_entry_read_length,
-                         uint32_t *urb_entry_read_offset);
 
 /* gen6_surface_state.c */
 void gen6_init_vtable_surface_functions(struct brw_context *brw);
@@ -388,84 +287,18 @@ gen7_upload_constant_state(struct brw_context *brw,
                            const struct brw_stage_state *stage_state,
                            bool active, unsigned opcode);
 
-void gen7_rs_control(struct brw_context *brw, int enable);
-
-void gen7_edit_hw_binding_table_entry(struct brw_context *brw,
-                                      gl_shader_stage stage,
-                                      uint32_t index,
-                                      uint32_t surf_offset);
-void gen7_update_binding_table_from_array(struct brw_context *brw,
-                                          gl_shader_stage stage,
-                                          const uint32_t* binding_table,
-                                          int num_surfaces);
-void gen7_enable_hw_binding_tables(struct brw_context *brw);
-void gen7_disable_hw_binding_tables(struct brw_context *brw);
-void gen7_reset_hw_bt_pool_offsets(struct brw_context *brw);
-
-/* brw_interpolation_map.c */
-void brw_setup_vue_interpolation(struct brw_context *brw);
-
 /* brw_clip.c */
 void brw_upload_clip_prog(struct brw_context *brw);
 
 /* brw_sf.c */
 void brw_upload_sf_prog(struct brw_context *brw);
 
+bool brw_is_drawing_points(const struct brw_context *brw);
+bool brw_is_drawing_lines(const struct brw_context *brw);
+
 /* gen7_l3_state.c */
 void
 gen7_restore_default_l3_config(struct brw_context *brw);
-
-static inline bool
-is_drawing_points(const struct brw_context *brw)
-{
-   /* Determine if the primitives *reaching the SF* are points */
-   /* _NEW_POLYGON */
-   if (brw->ctx.Polygon.FrontMode == GL_POINT ||
-       brw->ctx.Polygon.BackMode == GL_POINT) {
-      return true;
-   }
-
-   if (brw->geometry_program) {
-      /* BRW_NEW_GEOMETRY_PROGRAM */
-      return brw->geometry_program->OutputType == GL_POINTS;
-   } else if (brw->tes.prog_data) {
-      /* BRW_NEW_TES_PROG_DATA */
-      return brw->tes.prog_data->output_topology ==
-             BRW_TESS_OUTPUT_TOPOLOGY_POINT;
-   } else {
-      /* BRW_NEW_PRIMITIVE */
-      return brw->primitive == _3DPRIM_POINTLIST;
-   }
-}
-
-static inline bool
-is_drawing_lines(const struct brw_context *brw)
-{
-   /* Determine if the primitives *reaching the SF* are points */
-   /* _NEW_POLYGON */
-   if (brw->ctx.Polygon.FrontMode == GL_LINE ||
-       brw->ctx.Polygon.BackMode == GL_LINE) {
-      return true;
-   }
-
-   if (brw->geometry_program) {
-      /* BRW_NEW_GEOMETRY_PROGRAM */
-      return brw->geometry_program->OutputType == GL_LINE_STRIP;
-   } else if (brw->tes.prog_data) {
-      /* BRW_NEW_TES_PROG_DATA */
-      return brw->tes.prog_data->output_topology ==
-             BRW_TESS_OUTPUT_TOPOLOGY_LINE;
-   } else {
-      /* BRW_NEW_PRIMITIVE */
-      switch (brw->primitive) {
-      case _3DPRIM_LINELIST:
-      case _3DPRIM_LINESTRIP:
-      case _3DPRIM_LINELOOP:
-         return true;
-      }
-   }
-   return false;
-}
 
 static inline bool
 use_state_point_size(const struct brw_context *brw)
@@ -516,6 +349,71 @@ use_state_point_size(const struct brw_context *brw)
           (brw->vue_map_geom_out.slots_valid & VARYING_BIT_PSIZ) == 0;
 }
 
+void brw_copy_pipeline_atoms(struct brw_context *brw,
+                             enum brw_pipeline pipeline,
+                             const struct brw_tracked_state **atoms,
+                             int num_atoms);
+void gen4_init_atoms(struct brw_context *brw);
+void gen45_init_atoms(struct brw_context *brw);
+void gen5_init_atoms(struct brw_context *brw);
+void gen6_init_atoms(struct brw_context *brw);
+void gen7_init_atoms(struct brw_context *brw);
+void gen75_init_atoms(struct brw_context *brw);
+void gen8_init_atoms(struct brw_context *brw);
+void gen9_init_atoms(struct brw_context *brw);
+void gen10_init_atoms(struct brw_context *brw);
+
+void upload_gs_state_for_tf(struct brw_context *brw);
+
+/* Memory Object Control State:
+ * Specifying zero for L3 means "uncached in L3", at least on Haswell
+ * and Baytrail, since there are no PTE flags for setting L3 cacheability.
+ * On Ivybridge, the PTEs do have a cache-in-L3 bit, so setting MOCS to 0
+ * may still respect that.
+ */
+#define GEN7_MOCS_L3                    1
+
+/* Ivybridge only: cache in LLC.
+ * Specifying zero here means to use the PTE values set by the kernel;
+ * non-zero overrides the PTE values.
+ */
+#define IVB_MOCS_LLC                    (1 << 1)
+
+/* Baytrail only: snoop in CPU cache */
+#define BYT_MOCS_SNOOP                  (1 << 1)
+
+/* Haswell only: LLC/eLLC controls (write-back or uncached).
+ * Specifying zero here means to use the PTE values set by the kernel,
+ * which is useful since it offers additional control (write-through
+ * cacheing and age).  Non-zero overrides the PTE values.
+ */
+#define HSW_MOCS_UC_LLC_UC_ELLC         (1 << 1)
+#define HSW_MOCS_WB_LLC_WB_ELLC         (2 << 1)
+#define HSW_MOCS_UC_LLC_WB_ELLC         (3 << 1)
+
+/* Broadwell: these defines always use all available caches (L3, LLC, eLLC),
+ * and let you force write-back (WB) or write-through (WT) caching, or leave
+ * it up to the page table entry (PTE) specified by the kernel.
+ */
+#define BDW_MOCS_WB  0x78
+#define BDW_MOCS_WT  0x58
+#define BDW_MOCS_PTE 0x18
+
+/* Skylake: MOCS is now an index into an array of 62 different caching
+ * configurations programmed by the kernel.
+ */
+/* TC=LLC/eLLC, LeCC=WB, LRUM=3, L3CC=WB */
+#define SKL_MOCS_WB  (2 << 1)
+/* TC=LLC/eLLC, LeCC=PTE, LRUM=3, L3CC=WB */
+#define SKL_MOCS_PTE (1 << 1)
+
+/* Cannonlake: MOCS is now an index into an array of 62 different caching
+ * configurations programmed by the kernel.
+ */
+/* TC=LLC/eLLC, LeCC=WB, LRUM=3, L3CC=WB */
+#define CNL_MOCS_WB  (2 << 1)
+/* TC=LLC/eLLC, LeCC=PTE, LRUM=3, L3CC=WB */
+#define CNL_MOCS_PTE (1 << 1)
 
 #ifdef __cplusplus
 }

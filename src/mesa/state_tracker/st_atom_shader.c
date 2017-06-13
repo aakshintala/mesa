@@ -51,20 +51,8 @@
 #include "st_context.h"
 #include "st_atom.h"
 #include "st_program.h"
+#include "st_texture.h"
 
-
-/** Compress the fog function enums into a 2-bit value */
-static GLuint
-translate_fog_mode(GLenum mode)
-{
-   switch (mode) {
-   case GL_LINEAR: return 1;
-   case GL_EXP:    return 2;
-   case GL_EXP2:   return 3;
-   default:
-      return 0;
-   }
-}
 
 static unsigned
 get_texture_target(struct gl_context *ctx, const unsigned unit)
@@ -105,15 +93,15 @@ get_texture_target(struct gl_context *ctx, const unsigned unit)
  * Update fragment program state/atom.  This involves translating the
  * Mesa fragment program into a gallium fragment program and binding it.
  */
-static void
-update_fp( struct st_context *st )
+void
+st_update_fp( struct st_context *st )
 {
    struct st_fragment_program *stfp;
    struct st_fp_variant_key key;
 
    assert(st->ctx->FragmentProgram._Current);
    stfp = st_fragment_program(st->ctx->FragmentProgram._Current);
-   assert(stfp->Base.Base.Target == GL_FRAGMENT_PROGRAM_ARB);
+   assert(stfp->Base.Target == GL_FRAGMENT_PROGRAM_ARB);
 
    memset(&key, 0, sizeof(key));
    key.st = st->has_shareable_shaders ? NULL : st;
@@ -131,16 +119,14 @@ update_fp( struct st_context *st )
       _mesa_geometric_samples(st->ctx->DrawBuffer) > 1;
 
    if (stfp->ati_fs) {
-      unsigned u;
+      key.fog = st->ctx->Fog._PackedEnabledMode;
 
-      if (st->ctx->Fog.Enabled) {
-         key.fog = translate_fog_mode(st->ctx->Fog.Mode);
-      }
-
-      for (u = 0; u < MAX_NUM_FRAGMENT_REGISTERS_ATI; u++) {
+      for (unsigned u = 0; u < MAX_NUM_FRAGMENT_REGISTERS_ATI; u++) {
          key.texture_targets[u] = get_texture_target(st->ctx, u);
       }
    }
+
+   key.external = st_get_external_sampler_key(st, &stfp->Base);
 
    st->fp_variant = st_get_fp_variant(st, stfp, &key);
 
@@ -151,23 +137,12 @@ update_fp( struct st_context *st )
 }
 
 
-const struct st_tracked_state st_update_fp = {
-   "st_update_fp",					/* name */
-   {							/* dirty */
-      _NEW_BUFFERS | _NEW_MULTISAMPLE | _NEW_FOG,	/* mesa */
-      ST_NEW_FRAGMENT_PROGRAM                           /* st */
-   },
-   update_fp  					/* update */
-};
-
-
-
 /**
  * Update vertex program state/atom.  This involves translating the
  * Mesa vertex program into a gallium fragment program and binding it.
  */
-static void
-update_vp( struct st_context *st )
+void
+st_update_vp( struct st_context *st )
 {
    struct st_vertex_program *stvp;
    struct st_vp_variant_key key;
@@ -177,7 +152,7 @@ update_vp( struct st_context *st )
     */
    assert(st->ctx->VertexProgram._Current);
    stvp = st_vertex_program(st->ctx->VertexProgram._Current);
-   assert(stvp->Base.Base.Target == GL_VERTEX_PROGRAM_ARB);
+   assert(stvp->Base.Target == GL_VERTEX_PROGRAM_ARB);
 
    memset(&key, 0, sizeof key);
    key.st = st->has_shareable_shaders ? NULL : st;
@@ -192,7 +167,7 @@ update_vp( struct st_context *st )
 
    key.clamp_color = st->clamp_vert_color_in_shader &&
                      st->ctx->Light._ClampVertexColor &&
-                     (stvp->Base.Base.OutputsWritten &
+                     (stvp->Base.info.outputs_written &
                       (VARYING_SLOT_COL0 |
                        VARYING_SLOT_COL1 |
                        VARYING_SLOT_BFC0 |
@@ -204,133 +179,94 @@ update_vp( struct st_context *st )
 
    cso_set_vertex_shader_handle(st->cso_context, 
                                 st->vp_variant->driver_shader);
-
-   st->vertex_result_to_slot = stvp->result_to_output;
 }
 
 
-const struct st_tracked_state st_update_vp = {
-   "st_update_vp",					/* name */
-   {							/* dirty */
-      0,                                                /* mesa */
-      ST_NEW_VERTEX_PROGRAM                             /* st */
-   },
-   update_vp						/* update */
-};
-
-
-
-static void
-update_gp( struct st_context *st )
+void
+st_update_gp( struct st_context *st )
 {
-   struct st_geometry_program *stgp;
+   struct st_common_program *stgp;
 
    if (!st->ctx->GeometryProgram._Current) {
       cso_set_geometry_shader_handle(st->cso_context, NULL);
+      st_reference_prog(st, &st->gp, NULL);
       return;
    }
 
-   stgp = st_geometry_program(st->ctx->GeometryProgram._Current);
-   assert(stgp->Base.Base.Target == GL_GEOMETRY_PROGRAM_NV);
+   stgp = st_common_program(st->ctx->GeometryProgram._Current);
+   assert(stgp->Base.Target == GL_GEOMETRY_PROGRAM_NV);
 
    st->gp_variant = st_get_basic_variant(st, PIPE_SHADER_GEOMETRY,
                                          &stgp->tgsi, &stgp->variants);
 
-   st_reference_geomprog(st, &st->gp, stgp);
+   st_reference_prog(st, &st->gp, stgp);
 
    cso_set_geometry_shader_handle(st->cso_context,
                                   st->gp_variant->driver_shader);
 }
 
-const struct st_tracked_state st_update_gp = {
-   "st_update_gp",			/* name */
-   {					/* dirty */
-      0,				/* mesa */
-      ST_NEW_GEOMETRY_PROGRAM           /* st */
-   },
-   update_gp  				/* update */
-};
 
-
-
-static void
-update_tcp( struct st_context *st )
+void
+st_update_tcp( struct st_context *st )
 {
-   struct st_tessctrl_program *sttcp;
+   struct st_common_program *sttcp;
 
    if (!st->ctx->TessCtrlProgram._Current) {
       cso_set_tessctrl_shader_handle(st->cso_context, NULL);
+      st_reference_prog(st, &st->tcp, NULL);
       return;
    }
 
-   sttcp = st_tessctrl_program(st->ctx->TessCtrlProgram._Current);
-   assert(sttcp->Base.Base.Target == GL_TESS_CONTROL_PROGRAM_NV);
+   sttcp = st_common_program(st->ctx->TessCtrlProgram._Current);
+   assert(sttcp->Base.Target == GL_TESS_CONTROL_PROGRAM_NV);
 
    st->tcp_variant = st_get_basic_variant(st, PIPE_SHADER_TESS_CTRL,
                                           &sttcp->tgsi, &sttcp->variants);
 
-   st_reference_tesscprog(st, &st->tcp, sttcp);
+   st_reference_prog(st, &st->tcp, sttcp);
 
    cso_set_tessctrl_shader_handle(st->cso_context,
                                   st->tcp_variant->driver_shader);
 }
 
-const struct st_tracked_state st_update_tcp = {
-   "st_update_tcp",			/* name */
-   {					/* dirty */
-      0,				/* mesa */
-      ST_NEW_TESSCTRL_PROGRAM           /* st */
-   },
-   update_tcp  				/* update */
-};
 
-
-
-static void
-update_tep( struct st_context *st )
+void
+st_update_tep( struct st_context *st )
 {
-   struct st_tesseval_program *sttep;
+   struct st_common_program *sttep;
 
    if (!st->ctx->TessEvalProgram._Current) {
       cso_set_tesseval_shader_handle(st->cso_context, NULL);
+      st_reference_prog(st, &st->tep, NULL);
       return;
    }
 
-   sttep = st_tesseval_program(st->ctx->TessEvalProgram._Current);
-   assert(sttep->Base.Base.Target == GL_TESS_EVALUATION_PROGRAM_NV);
+   sttep = st_common_program(st->ctx->TessEvalProgram._Current);
+   assert(sttep->Base.Target == GL_TESS_EVALUATION_PROGRAM_NV);
 
    st->tep_variant = st_get_basic_variant(st, PIPE_SHADER_TESS_EVAL,
                                           &sttep->tgsi, &sttep->variants);
 
-   st_reference_tesseprog(st, &st->tep, sttep);
+   st_reference_prog(st, &st->tep, sttep);
 
    cso_set_tesseval_shader_handle(st->cso_context,
                                   st->tep_variant->driver_shader);
 }
 
-const struct st_tracked_state st_update_tep = {
-   "st_update_tep",			/* name */
-   {					/* dirty */
-      0,				/* mesa */
-      ST_NEW_TESSEVAL_PROGRAM           /* st */
-   },
-   update_tep  				/* update */
-};
 
-
-
-static void
-update_cp( struct st_context *st )
+void
+st_update_cp( struct st_context *st )
 {
    struct st_compute_program *stcp;
 
    if (!st->ctx->ComputeProgram._Current) {
       cso_set_compute_shader_handle(st->cso_context, NULL);
+      st_reference_compprog(st, &st->cp, NULL);
       return;
    }
 
    stcp = st_compute_program(st->ctx->ComputeProgram._Current);
-   assert(stcp->Base.Base.Target == GL_COMPUTE_PROGRAM_NV);
+   assert(stcp->Base.Target == GL_COMPUTE_PROGRAM_NV);
 
    st->cp_variant = st_get_cp_variant(st, &stcp->tgsi, &stcp->variants);
 
@@ -339,12 +275,3 @@ update_cp( struct st_context *st )
    cso_set_compute_shader_handle(st->cso_context,
                                  st->cp_variant->driver_shader);
 }
-
-const struct st_tracked_state st_update_cp = {
-   "st_update_cp",			/* name */
-   {					/* dirty */
-      0,				/* mesa */
-      ST_NEW_COMPUTE_PROGRAM           /* st */
-   },
-   update_cp  				/* update */
-};

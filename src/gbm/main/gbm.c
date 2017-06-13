@@ -31,7 +31,12 @@
 #include <string.h>
 #include <stdint.h>
 
-#include <sys/types.h>
+#ifdef MAJOR_IN_MKDEV
+#include <sys/mkdev.h>
+#endif
+#ifdef MAJOR_IN_SYSMACROS
+#include <sys/sysmacros.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
@@ -39,12 +44,6 @@
 #include "gbm.h"
 #include "gbmint.h"
 #include "backend.h"
-
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
-
-static struct gbm_device *devices[16];
-
-static int device_num = 0;
 
 /** Returns the file description for the gbm device
  *
@@ -56,7 +55,6 @@ gbm_device_get_fd(struct gbm_device *gbm)
    return gbm->fd;
 }
 
-/* FIXME: maybe superfluous, use udev subclass from the fd? */
 /** Get the backend name for the given gbm device
  *
  * \return The backend name string - this belongs to the device and must not
@@ -99,32 +97,6 @@ gbm_device_destroy(struct gbm_device *gbm)
       gbm->destroy(gbm);
 }
 
-struct gbm_device *
-_gbm_mesa_get_device(int fd)
-{
-   struct gbm_device *gbm = NULL;
-   struct stat buf;
-   dev_t dev;
-   int i;
-
-   if (fd < 0 || fstat(fd, &buf) < 0 || !S_ISCHR(buf.st_mode)) {
-      errno = EINVAL;
-      return NULL;
-   }
-
-   for (i = 0; i < device_num; ++i) {
-      dev = devices[i]->stat.st_rdev;
-      if (major(dev) == major(buf.st_rdev) &&
-          minor(dev) == minor(buf.st_rdev)) {
-         gbm = devices[i];
-         gbm->refcount++;
-         break;
-      }
-   }
-
-   return gbm;
-}
-
 /** Create a gbm device for allocating buffers
  *
  * The file descriptor passed in is used by the backend to communicate with
@@ -148,9 +120,6 @@ gbm_create_device(int fd)
       return NULL;
    }
 
-   if (device_num == 0)
-      memset(devices, 0, sizeof devices);
-
    gbm = _gbm_create_device(fd);
    if (gbm == NULL)
       return NULL;
@@ -158,9 +127,6 @@ gbm_create_device(int fd)
    gbm->dummy = gbm_create_device;
    gbm->stat = buf;
    gbm->refcount = 1;
-
-   if (device_num < ARRAY_SIZE(devices)-1)
-      devices[device_num++] = gbm;
 
    return gbm;
 }
@@ -171,7 +137,7 @@ gbm_create_device(int fd)
  * \return The width of the allocated buffer object
  *
  */
-GBM_EXPORT unsigned int
+GBM_EXPORT uint32_t
 gbm_bo_get_width(struct gbm_bo *bo)
 {
    return bo->width;
@@ -182,7 +148,7 @@ gbm_bo_get_width(struct gbm_bo *bo)
  * \param bo The buffer object
  * \return The height of the allocated buffer object
  */
-GBM_EXPORT unsigned int
+GBM_EXPORT uint32_t
 gbm_bo_get_height(struct gbm_bo *bo)
 {
    return bo->height;
@@ -199,7 +165,20 @@ gbm_bo_get_height(struct gbm_bo *bo)
 GBM_EXPORT uint32_t
 gbm_bo_get_stride(struct gbm_bo *bo)
 {
-   return bo->stride;
+   return gbm_bo_get_stride_for_plane(bo, 0);
+}
+
+/** Get the stride for the given plane
+ *
+ * \param bo The buffer object
+ * \param plane for which you want the stride
+ *
+ * \sa gbm_bo_get_stride()
+ */
+GBM_EXPORT uint32_t
+gbm_bo_get_stride_for_plane(struct gbm_bo *bo, int plane)
+{
+   return bo->gbm->bo_get_stride(bo, plane);
 }
 
 /** Get the format of the buffer object
@@ -213,6 +192,32 @@ GBM_EXPORT uint32_t
 gbm_bo_get_format(struct gbm_bo *bo)
 {
    return bo->format;
+}
+
+/** Get the offset for the data of the specified plane
+ *
+ * Extra planes, and even the first plane, may have an offset from the start of
+ * the buffer object. This function will provide the offset for the given plane
+ * to be used in various KMS APIs.
+ *
+ * \param bo The buffer object
+ * \return The offset
+ */
+GBM_EXPORT uint32_t
+gbm_bo_get_offset(struct gbm_bo *bo, int plane)
+{
+   return bo->gbm->bo_get_offset(bo, plane);
+}
+
+/** Get the gbm device used to create the buffer object
+ *
+ * \param bo The buffer object
+ * \return Returns the gbm device with which the buffer object was created
+ */
+GBM_EXPORT struct gbm_device *
+gbm_bo_get_device(struct gbm_bo *bo)
+{
+	return bo->gbm;
 }
 
 /** Get the handle of the buffer object
@@ -237,7 +242,8 @@ gbm_bo_get_handle(struct gbm_bo *bo)
  * descriptor.
 
  * \param bo The buffer object
- * \return Returns a file descriptor referring  to the underlying buffer
+ * \return Returns a file descriptor referring to the underlying buffer or -1
+ * if an error occurs.
  */
 GBM_EXPORT int
 gbm_bo_get_fd(struct gbm_bo *bo)
@@ -245,6 +251,53 @@ gbm_bo_get_fd(struct gbm_bo *bo)
    return bo->gbm->bo_get_fd(bo);
 }
 
+/** Get the number of planes for the given bo.
+ *
+ * \param bo The buffer object
+ * \return The number of planes
+ */
+GBM_EXPORT int
+gbm_bo_get_plane_count(struct gbm_bo *bo)
+{
+   return bo->gbm->bo_get_planes(bo);
+}
+
+/** Get the handle for the specified plane of the buffer object
+ *
+ * This function gets the handle for any plane associated with the BO. When
+ * dealing with multi-planar formats, or formats which might have implicit
+ * planes based on different underlying hardware it is necessary for the client
+ * to be able to get this information to pass to the DRM.
+ *
+ * \param bo The buffer object
+ * \param plane the plane to get a handle for
+ *
+ * \sa gbm_bo_get_handle()
+ */
+GBM_EXPORT union gbm_bo_handle
+gbm_bo_get_handle_for_plane(struct gbm_bo *bo, int plane)
+{
+   return bo->gbm->bo_get_handle(bo, plane);
+}
+
+/**
+ * Get the chosen modifier for the buffer object
+ *
+ * This function returns the modifier that was chosen for the object. These
+ * properties may be generic, or platform/implementation dependent.
+ *
+ * \param bo The buffer object
+ * \return Returns the selected modifier (chosen by the implementation) for the
+ * BO.
+ * \sa gbm_bo_create_with_modifiers() where possible modifiers are set
+ * \sa gbm_surface_create_with_modifiers() where possible modifiers are set
+ * \sa define DRM_FORMAT_MOD_* in drm_fourcc.h for possible modifiers
+ */
+GBM_EXPORT uint64_t
+gbm_bo_get_modifier(struct gbm_bo *bo)
+{
+   return bo->gbm->bo_get_modifier(bo);
+}
 
 /** Write data into the buffer object
  *
@@ -263,17 +316,6 @@ GBM_EXPORT int
 gbm_bo_write(struct gbm_bo *bo, const void *buf, size_t count)
 {
    return bo->gbm->bo_write(bo, buf, count);
-}
-
-/** Get the gbm device used to create the buffer object
- *
- * \param bo The buffer object
- * \return Returns the gbm device with which the buffer object was created
- */
-GBM_EXPORT struct gbm_device *
-gbm_bo_get_device(struct gbm_bo *bo)
-{
-	return bo->gbm;
 }
 
 /** Set the user data associated with a buffer object
@@ -346,15 +388,34 @@ gbm_bo_create(struct gbm_device *gbm,
       return NULL;
    }
 
-   return gbm->bo_create(gbm, width, height, format, usage);
+   return gbm->bo_create(gbm, width, height, format, usage, NULL, 0);
 }
 
+GBM_EXPORT struct gbm_bo *
+gbm_bo_create_with_modifiers(struct gbm_device *gbm,
+                             uint32_t width, uint32_t height,
+                             uint32_t format,
+                             const uint64_t *modifiers,
+                             const unsigned int count)
+{
+   if (width == 0 || height == 0) {
+      errno = EINVAL;
+      return NULL;
+   }
+
+   if ((count && !modifiers) || (modifiers && !count)) {
+      errno = EINVAL;
+      return NULL;
+   }
+
+   return gbm->bo_create(gbm, width, height, format, 0, modifiers, count);
+}
 /**
  * Create a gbm buffer object from an foreign object
  *
  * This function imports a foreign object and creates a new gbm bo for it.
  * This enabled using the foreign object with a display API such as KMS.
- * Currently two types of foreign objects are supported, indicated by the type
+ * Currently three types of foreign objects are supported, indicated by the type
  * argument:
  *
  *   GBM_BO_IMPORT_WL_BUFFER
@@ -454,7 +515,23 @@ gbm_surface_create(struct gbm_device *gbm,
                    uint32_t width, uint32_t height,
 		   uint32_t format, uint32_t flags)
 {
-   return gbm->surface_create(gbm, width, height, format, flags);
+   return gbm->surface_create(gbm, width, height, format, flags, NULL, 0);
+}
+
+GBM_EXPORT struct gbm_surface *
+gbm_surface_create_with_modifiers(struct gbm_device *gbm,
+                                  uint32_t width, uint32_t height,
+                                  uint32_t format,
+                                  const uint64_t *modifiers,
+                                  const unsigned int count)
+{
+   if ((count && !modifiers) || (modifiers && !count)) {
+      errno = EINVAL;
+      return NULL;
+   }
+
+   return gbm->surface_create(gbm, width, height, format, 0,
+                              modifiers, count);
 }
 
 /**

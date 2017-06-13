@@ -28,9 +28,11 @@
 
 #include "pipebuffer/pb_buffer.h"
 
+#include "amd/common/ac_gpu_info.h"
+#include "amd/common/ac_surface.h"
+
 #define RADEON_FLUSH_ASYNC		(1 << 0)
-#define RADEON_FLUSH_KEEP_TILING_FLAGS	(1 << 1)
-#define RADEON_FLUSH_END_OF_FRAME       (1 << 2)
+#define RADEON_FLUSH_END_OF_FRAME       (1 << 1)
 
 /* Tiling flags. */
 enum radeon_bo_layout {
@@ -51,97 +53,22 @@ enum radeon_bo_flag { /* bitfield */
     RADEON_FLAG_GTT_WC =        (1 << 0),
     RADEON_FLAG_CPU_ACCESS =    (1 << 1),
     RADEON_FLAG_NO_CPU_ACCESS = (1 << 2),
+    RADEON_FLAG_HANDLE =        (1 << 3), /* the buffer must not be suballocated */
+    RADEON_FLAG_SPARSE =        (1 << 4),
 };
 
 enum radeon_bo_usage { /* bitfield */
     RADEON_USAGE_READ = 2,
     RADEON_USAGE_WRITE = 4,
-    RADEON_USAGE_READWRITE = RADEON_USAGE_READ | RADEON_USAGE_WRITE
+    RADEON_USAGE_READWRITE = RADEON_USAGE_READ | RADEON_USAGE_WRITE,
+
+    /* The winsys ensures that the CS submission will be scheduled after
+     * previously flushed CSs referencing this BO in a conflicting way.
+     */
+    RADEON_USAGE_SYNCHRONIZED = 8
 };
 
-enum radeon_family {
-    CHIP_UNKNOWN = 0,
-    CHIP_R300, /* R3xx-based cores. */
-    CHIP_R350,
-    CHIP_RV350,
-    CHIP_RV370,
-    CHIP_RV380,
-    CHIP_RS400,
-    CHIP_RC410,
-    CHIP_RS480,
-    CHIP_R420,     /* R4xx-based cores. */
-    CHIP_R423,
-    CHIP_R430,
-    CHIP_R480,
-    CHIP_R481,
-    CHIP_RV410,
-    CHIP_RS600,
-    CHIP_RS690,
-    CHIP_RS740,
-    CHIP_RV515,    /* R5xx-based cores. */
-    CHIP_R520,
-    CHIP_RV530,
-    CHIP_R580,
-    CHIP_RV560,
-    CHIP_RV570,
-    CHIP_R600,
-    CHIP_RV610,
-    CHIP_RV630,
-    CHIP_RV670,
-    CHIP_RV620,
-    CHIP_RV635,
-    CHIP_RS780,
-    CHIP_RS880,
-    CHIP_RV770,
-    CHIP_RV730,
-    CHIP_RV710,
-    CHIP_RV740,
-    CHIP_CEDAR,
-    CHIP_REDWOOD,
-    CHIP_JUNIPER,
-    CHIP_CYPRESS,
-    CHIP_HEMLOCK,
-    CHIP_PALM,
-    CHIP_SUMO,
-    CHIP_SUMO2,
-    CHIP_BARTS,
-    CHIP_TURKS,
-    CHIP_CAICOS,
-    CHIP_CAYMAN,
-    CHIP_ARUBA,
-    CHIP_TAHITI,
-    CHIP_PITCAIRN,
-    CHIP_VERDE,
-    CHIP_OLAND,
-    CHIP_HAINAN,
-    CHIP_BONAIRE,
-    CHIP_KAVERI,
-    CHIP_KABINI,
-    CHIP_HAWAII,
-    CHIP_MULLINS,
-    CHIP_TONGA,
-    CHIP_ICELAND,
-    CHIP_CARRIZO,
-    CHIP_FIJI,
-    CHIP_STONEY,
-    CHIP_POLARIS10,
-    CHIP_POLARIS11,
-    CHIP_LAST,
-};
-
-enum chip_class {
-    CLASS_UNKNOWN = 0,
-    R300,
-    R400,
-    R500,
-    R600,
-    R700,
-    EVERGREEN,
-    CAYMAN,
-    SI,
-    CIK,
-    VI,
-};
+#define RADEON_SPARSE_PAGE_SIZE (64 * 1024)
 
 enum ring_type {
     RING_GFX = 0,
@@ -149,22 +76,32 @@ enum ring_type {
     RING_DMA,
     RING_UVD,
     RING_VCE,
+    RING_UVD_ENC,
+    RING_VCN_DEC,
     RING_LAST,
 };
 
 enum radeon_value_id {
     RADEON_REQUESTED_VRAM_MEMORY,
     RADEON_REQUESTED_GTT_MEMORY,
+    RADEON_MAPPED_VRAM,
+    RADEON_MAPPED_GTT,
     RADEON_BUFFER_WAIT_TIME_NS,
+    RADEON_NUM_MAPPED_BUFFERS,
     RADEON_TIMESTAMP,
-    RADEON_NUM_CS_FLUSHES,
+    RADEON_NUM_GFX_IBS,
+    RADEON_NUM_SDMA_IBS,
     RADEON_NUM_BYTES_MOVED,
+    RADEON_NUM_EVICTIONS,
+    RADEON_NUM_VRAM_CPU_PAGE_FAULTS,
     RADEON_VRAM_USAGE,
+    RADEON_VRAM_VIS_USAGE,
     RADEON_GTT_USAGE,
     RADEON_GPU_TEMPERATURE, /* DRM 2.42.0 */
     RADEON_CURRENT_SCLK,
     RADEON_CURRENT_MCLK,
     RADEON_GPU_RESET_COUNTER, /* DRM 2.43.0 */
+    RADEON_CS_THREAD_TIME,
 };
 
 /* Each group of four has the same priority. */
@@ -179,46 +116,44 @@ enum radeon_bo_priority {
     RADEON_PRIO_DRAW_INDIRECT,
     RADEON_PRIO_INDEX_BUFFER,
 
-    RADEON_PRIO_CP_DMA = 8,
-
-    RADEON_PRIO_VCE = 12,
+    RADEON_PRIO_VCE = 8,
     RADEON_PRIO_UVD,
     RADEON_PRIO_SDMA_BUFFER,
     RADEON_PRIO_SDMA_TEXTURE,
 
-    RADEON_PRIO_USER_SHADER = 16,
-    RADEON_PRIO_INTERNAL_SHADER, /* fetch shader, etc. */
+    RADEON_PRIO_CP_DMA = 12,
 
-    /* gap: 20 */
-
-    RADEON_PRIO_CONST_BUFFER = 24,
+    RADEON_PRIO_CONST_BUFFER = 16,
     RADEON_PRIO_DESCRIPTORS,
     RADEON_PRIO_BORDER_COLORS,
 
-    RADEON_PRIO_SAMPLER_BUFFER = 28,
+    RADEON_PRIO_SAMPLER_BUFFER = 20,
     RADEON_PRIO_VERTEX_BUFFER,
 
-    RADEON_PRIO_SHADER_RW_BUFFER = 32,
-    RADEON_PRIO_RINGS_STREAMOUT,
-    RADEON_PRIO_SCRATCH_BUFFER,
+    RADEON_PRIO_SHADER_RW_BUFFER = 24,
     RADEON_PRIO_COMPUTE_GLOBAL,
 
-    RADEON_PRIO_SAMPLER_TEXTURE = 36,
+    RADEON_PRIO_SAMPLER_TEXTURE = 28,
     RADEON_PRIO_SHADER_RW_IMAGE,
 
-    RADEON_PRIO_SAMPLER_TEXTURE_MSAA = 40,
+    RADEON_PRIO_SAMPLER_TEXTURE_MSAA = 32,
 
-    RADEON_PRIO_COLOR_BUFFER = 44,
+    RADEON_PRIO_COLOR_BUFFER = 36,
 
-    RADEON_PRIO_DEPTH_BUFFER = 48,
+    RADEON_PRIO_DEPTH_BUFFER = 40,
 
-    RADEON_PRIO_COLOR_BUFFER_MSAA = 52,
+    RADEON_PRIO_COLOR_BUFFER_MSAA = 44,
 
-    RADEON_PRIO_DEPTH_BUFFER_MSAA = 56,
+    RADEON_PRIO_DEPTH_BUFFER_MSAA = 48,
 
-    RADEON_PRIO_CMASK = 60,
+    RADEON_PRIO_CMASK = 52,
     RADEON_PRIO_DCC,
     RADEON_PRIO_HTILE,
+    RADEON_PRIO_SHADER_BINARY, /* the hw can't hide instruction cache misses */
+
+    RADEON_PRIO_SHADER_RINGS = 56,
+
+    RADEON_PRIO_SCRATCH_BUFFER = 60,
     /* 63 is the maximum value */
 };
 
@@ -237,59 +172,11 @@ struct radeon_winsys_cs {
     unsigned                      num_prev; /* Number of previous chunks. */
     unsigned                      max_prev; /* Space in array pointed to by prev. */
     unsigned                      prev_dw; /* Total number of dwords in previous chunks. */
-};
 
-struct radeon_info {
-    /* PCI info: domain:bus:dev:func */
-    uint32_t                    pci_domain;
-    uint32_t                    pci_bus;
-    uint32_t                    pci_dev;
-    uint32_t                    pci_func;
-
-    /* Device info. */
-    uint32_t                    pci_id;
-    enum radeon_family          family;
-    enum chip_class             chip_class;
-    uint32_t                    gart_page_size;
-    uint64_t                    gart_size;
-    uint64_t                    vram_size;
-    bool                        has_dedicated_vram;
-    bool                        has_virtual_memory;
-    bool                        gfx_ib_pad_with_type2;
-    bool                        has_sdma;
-    bool                        has_uvd;
-    uint32_t                    uvd_fw_version;
-    uint32_t                    vce_fw_version;
-    uint32_t                    vce_harvest_config;
-    uint32_t                    clock_crystal_freq;
-
-    /* Kernel info. */
-    uint32_t                    drm_major; /* version */
-    uint32_t                    drm_minor;
-    uint32_t                    drm_patchlevel;
-    bool                        has_userptr;
-
-    /* Shader cores. */
-    uint32_t                    r600_max_quad_pipes; /* wave size / 16 */
-    uint32_t                    max_shader_clock;
-    uint32_t                    num_good_compute_units;
-    uint32_t                    max_se; /* shader engines */
-    uint32_t                    max_sh_per_se; /* shader arrays per shader engine */
-
-    /* Render backends (color + depth blocks). */
-    uint32_t                    r300_num_gb_pipes;
-    uint32_t                    r300_num_z_pipes;
-    uint32_t                    r600_gb_backend_map; /* R600 harvest config */
-    bool                        r600_gb_backend_map_valid;
-    uint32_t                    r600_num_banks;
-    uint32_t                    num_render_backends;
-    uint32_t                    num_tile_pipes; /* pipe count from PIPE_CONFIG */
-    uint32_t                    pipe_interleave_bytes;
-    uint32_t                    enabled_rb_mask; /* GCN harvest config */
-
-    /* Tile modes. */
-    uint32_t                    si_tile_mode_array[32];
-    uint32_t                    cik_macrotile_mode_array[16];
+    /* Memory usage of the buffer list. These are always 0 for CE and preamble
+     * IBs. */
+    uint64_t                      used_vram;
+    uint64_t                      used_gart;
 };
 
 /* Tiling info for display code, DRI sharing, and other data. */
@@ -297,16 +184,25 @@ struct radeon_bo_metadata {
     /* Tiling flags describing the texture layout for display code
      * and DRI sharing.
      */
-    enum radeon_bo_layout   microtile;
-    enum radeon_bo_layout   macrotile;
-    unsigned                pipe_config;
-    unsigned                bankw;
-    unsigned                bankh;
-    unsigned                tile_split;
-    unsigned                mtilea;
-    unsigned                num_banks;
-    unsigned                stride;
-    bool                    scanout;
+    union {
+        struct {
+            enum radeon_bo_layout   microtile;
+            enum radeon_bo_layout   macrotile;
+            unsigned                pipe_config;
+            unsigned                bankw;
+            unsigned                bankh;
+            unsigned                tile_split;
+            unsigned                mtilea;
+            unsigned                num_banks;
+            unsigned                stride;
+            bool                    scanout;
+        } legacy;
+
+        struct {
+            /* surface flags */
+            unsigned swizzle_mode:5;
+        } gfx9;
+    } u;
 
     /* Additional metadata associated with the buffer, in bytes.
      * The maximum size is 64 * 4. This is opaque for the winsys & kernel.
@@ -321,92 +217,8 @@ enum radeon_feature_id {
     RADEON_FID_R300_CMASK_ACCESS,
 };
 
-#define RADEON_SURF_MAX_LEVEL                   32
-
-#define RADEON_SURF_TYPE_MASK                   0xFF
-#define RADEON_SURF_TYPE_SHIFT                  0
-#define     RADEON_SURF_TYPE_1D                     0
-#define     RADEON_SURF_TYPE_2D                     1
-#define     RADEON_SURF_TYPE_3D                     2
-#define     RADEON_SURF_TYPE_CUBEMAP                3
-#define     RADEON_SURF_TYPE_1D_ARRAY               4
-#define     RADEON_SURF_TYPE_2D_ARRAY               5
-#define RADEON_SURF_MODE_MASK                   0xFF
-#define RADEON_SURF_MODE_SHIFT                  8
-#define     RADEON_SURF_MODE_LINEAR_ALIGNED         1
-#define     RADEON_SURF_MODE_1D                     2
-#define     RADEON_SURF_MODE_2D                     3
-#define RADEON_SURF_SCANOUT                     (1 << 16)
-#define RADEON_SURF_ZBUFFER                     (1 << 17)
-#define RADEON_SURF_SBUFFER                     (1 << 18)
-#define RADEON_SURF_Z_OR_SBUFFER                (RADEON_SURF_ZBUFFER | RADEON_SURF_SBUFFER)
-#define RADEON_SURF_HAS_SBUFFER_MIPTREE         (1 << 19)
-#define RADEON_SURF_HAS_TILE_MODE_INDEX         (1 << 20)
-#define RADEON_SURF_FMASK                       (1 << 21)
-#define RADEON_SURF_DISABLE_DCC                 (1 << 22)
-
-#define RADEON_SURF_GET(v, field)   (((v) >> RADEON_SURF_ ## field ## _SHIFT) & RADEON_SURF_ ## field ## _MASK)
-#define RADEON_SURF_SET(v, field)   (((v) & RADEON_SURF_ ## field ## _MASK) << RADEON_SURF_ ## field ## _SHIFT)
-#define RADEON_SURF_CLR(v, field)   ((v) & ~(RADEON_SURF_ ## field ## _MASK << RADEON_SURF_ ## field ## _SHIFT))
-
-struct radeon_surf_level {
-    uint64_t                    offset;
-    uint64_t                    slice_size;
-    uint32_t                    npix_x;
-    uint32_t                    npix_y;
-    uint32_t                    npix_z;
-    uint32_t                    nblk_x;
-    uint32_t                    nblk_y;
-    uint32_t                    nblk_z;
-    uint32_t                    pitch_bytes;
-    uint32_t                    mode;
-    uint64_t                    dcc_offset;
-    uint64_t                    dcc_fast_clear_size;
-    bool                        dcc_enabled;
-};
-
-struct radeon_surf {
-    /* These are inputs to the calculator. */
-    uint32_t                    npix_x;
-    uint32_t                    npix_y;
-    uint32_t                    npix_z;
-    uint32_t                    blk_w;
-    uint32_t                    blk_h;
-    uint32_t                    blk_d;
-    uint32_t                    array_size;
-    uint32_t                    last_level;
-    uint32_t                    bpe;
-    uint32_t                    nsamples;
-    uint32_t                    flags;
-
-    /* These are return values. Some of them can be set by the caller, but
-     * they will be treated as hints (e.g. bankw, bankh) and might be
-     * changed by the calculator.
-     */
-    uint64_t                    bo_size;
-    uint64_t                    bo_alignment;
-    /* This applies to EG and later. */
-    uint32_t                    bankw;
-    uint32_t                    bankh;
-    uint32_t                    mtilea;
-    uint32_t                    tile_split;
-    uint32_t                    stencil_tile_split;
-    uint64_t                    stencil_offset;
-    struct radeon_surf_level    level[RADEON_SURF_MAX_LEVEL];
-    struct radeon_surf_level    stencil_level[RADEON_SURF_MAX_LEVEL];
-    uint32_t                    tiling_index[RADEON_SURF_MAX_LEVEL];
-    uint32_t                    stencil_tiling_index[RADEON_SURF_MAX_LEVEL];
-    uint32_t                    pipe_config;
-    uint32_t                    num_banks;
-    uint32_t                    macro_tile_index;
-    uint32_t                    micro_tile_mode; /* displayable, thin, depth, rotated */
-
-    uint64_t                    dcc_size;
-    uint64_t                    dcc_alignment;
-};
-
 struct radeon_bo_list_item {
-    struct pb_buffer *buf;
+    uint64_t bo_size;
     uint64_t vm_address;
     uint64_t priority_usage; /* mask of (1 << RADEON_PRIO_*) */
 };
@@ -563,12 +375,41 @@ struct radeon_winsys {
                               struct winsys_handle *whandle);
 
     /**
+     * Change the commitment of a (64KB-page aligned) region of the given
+     * sparse buffer.
+     *
+     * \warning There is no automatic synchronization with command submission.
+     *
+     * \note Only implemented by the amdgpu winsys.
+     *
+     * \return false on out of memory or other failure, true on success.
+     */
+    bool (*buffer_commit)(struct pb_buffer *buf,
+                          uint64_t offset, uint64_t size,
+                          bool commit);
+
+    /**
      * Return the virtual address of a buffer.
+     *
+     * When virtual memory is not in use, this is the offset relative to the
+     * relocation base (non-zero for sub-allocated buffers).
      *
      * \param buf       A winsys buffer object
      * \return          virtual address
      */
     uint64_t (*buffer_get_virtual_address)(struct pb_buffer *buf);
+
+    /**
+     * Return the offset of this buffer relative to the relocation base.
+     * This is only non-zero for sub-allocated buffers.
+     *
+     * This is only supported in the radeon winsys, since amdgpu uses virtual
+     * addresses in submissions even for the video engines.
+     *
+     * \param buf      A winsys buffer object
+     * \return         the offset for relocations
+     */
+    unsigned (*buffer_get_reloc_offset)(struct pb_buffer *buf);
 
     /**
      * Query the initial placement of the buffer from the kernel driver.
@@ -669,6 +510,9 @@ struct radeon_winsys {
     /**
      * Return the index of an already-added buffer.
      *
+     * Not supported on amdgpu. Drivers with GPUVM should not care about
+     * buffer indices.
+     *
      * \param cs        Command stream
      * \param buf       Buffer
      * \return          The buffer index, or -1 if the buffer has not been added.
@@ -696,20 +540,10 @@ struct radeon_winsys {
     bool (*cs_check_space)(struct radeon_winsys_cs *cs, unsigned dw);
 
     /**
-     * Return true if there is enough memory in VRAM and GTT for the buffers
-     * added so far.
-     *
-     * \param cs        A command stream to validate.
-     * \param vram      VRAM memory size pending to be use
-     * \param gtt       GTT memory size pending to be use
-     */
-    bool (*cs_memory_below_limit)(struct radeon_winsys_cs *cs,
-                                  uint64_t vram, uint64_t gtt);
-
-    uint64_t (*cs_query_memory_usage)(struct radeon_winsys_cs *cs);
-
-    /**
      * Return the buffer list.
+     *
+     * This is the buffer list as passed to the kernel, i.e. it only contains
+     * the parent buffers of sub-allocated buffers.
      *
      * \param cs    Command stream
      * \param list  Returned buffer list. Set to NULL to query the count only.
@@ -725,10 +559,19 @@ struct radeon_winsys {
      * \param flags,      RADEON_FLUSH_ASYNC or 0.
      * \param fence       Pointer to a fence. If non-NULL, a fence is inserted
      *                    after the CS and is returned through this parameter.
+     * \return Negative POSIX error code or 0 for success.
+     *         Asynchronous submissions never return an error.
      */
-    void (*cs_flush)(struct radeon_winsys_cs *cs,
-                     unsigned flags,
-                     struct pipe_fence_handle **fence);
+    int (*cs_flush)(struct radeon_winsys_cs *cs,
+                    unsigned flags,
+                    struct pipe_fence_handle **fence);
+
+    /**
+     * Create a fence before the CS is flushed.
+     * The user must flush manually to complete the initializaton of the fence.
+     * The fence must not be used before the flush.
+     */
+    struct pipe_fence_handle *(*cs_get_next_fence)(struct radeon_winsys_cs *cs);
 
     /**
      * Return true if a buffer is referenced by a command stream.
@@ -777,18 +620,16 @@ struct radeon_winsys {
      * Initialize surface
      *
      * \param ws        The winsys this function is called from.
-     * \param surf      Surface structure ptr
+     * \param tex       Input texture description
+     * \param flags     Bitmask of RADEON_SURF_* flags
+     * \param bpe       Bytes per pixel, it can be different for Z buffers.
+     * \param mode      Preferred tile mode. (linear, 1D, or 2D)
+     * \param surf      Output structure
      */
     int (*surface_init)(struct radeon_winsys *ws,
-                        struct radeon_surf *surf);
-
-    /**
-     * Find best values for a surface
-     *
-     * \param ws        The winsys this function is called from.
-     * \param surf      Surface structure ptr
-     */
-    int (*surface_best)(struct radeon_winsys *ws,
+                        const struct pipe_resource *tex,
+                        unsigned flags, unsigned bpe,
+                        enum radeon_surf_mode mode,
                         struct radeon_surf *surf);
 
     uint64_t (*query_value)(struct radeon_winsys *ws,
@@ -796,6 +637,8 @@ struct radeon_winsys {
 
     bool (*read_registers)(struct radeon_winsys *ws, unsigned reg_offset,
                            unsigned num_registers, uint32_t *out);
+
+    const char* (*get_chip_name)(struct radeon_winsys *ws);
 };
 
 static inline bool radeon_emitted(struct radeon_winsys_cs *cs, unsigned num_dw)

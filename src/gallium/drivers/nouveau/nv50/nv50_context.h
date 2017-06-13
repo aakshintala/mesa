@@ -97,7 +97,10 @@
 /* Sample position pairs for the current output MS level */
 #define NV50_CB_AUX_SAMPLE_OFFSET 0x300
 #define NV50_CB_AUX_SAMPLE_OFFSET_SIZE (4 * 8 * 2)
-/* next spot: 0x340 */
+/* Alpha test ref value */
+#define NV50_CB_AUX_ALPHATEST_OFFSET 0x340
+#define NV50_CB_AUX_ALPHATEST_SIZE (4)
+/* next spot: 0x344 */
 /* 4 32-bit floats for the vertex runout, put at the end */
 #define NV50_CB_AUX_RUNOUT_OFFSET (NV50_CB_AUX_SIZE - 0x10)
 
@@ -140,7 +143,6 @@ struct nv50_context {
    struct pipe_vertex_buffer vtxbuf[PIPE_MAX_ATTRIBS];
    unsigned num_vtxbufs;
    uint32_t vtxbufs_coherent;
-   struct pipe_index_buffer idxbuf;
    uint32_t vbo_fifo; /* bitmask of vertex elements to be pushed to FIFO */
    uint32_t vbo_user; /* bitmask of vertex buffers pointing to user memory */
    uint32_t vbo_constant; /* bitmask of user buffers with stride 0 */

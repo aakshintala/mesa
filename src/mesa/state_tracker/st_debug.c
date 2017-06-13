@@ -27,6 +27,7 @@
 
 
 #include "main/context.h"
+#include "main/debug_output.h"
 #include "program/prog_print.h"
 
 #include "pipe/p_state.h"
@@ -97,12 +98,12 @@ st_print_current(void)
 
    if (st->vp->variants)
       tgsi_dump( st->vp->variants[0].tgsi.tokens, 0 );
-   if (st->vp->Base.Base.Parameters)
-      _mesa_print_parameter_list(st->vp->Base.Base.Parameters);
+   if (st->vp->Base.Parameters)
+      _mesa_print_parameter_list(st->vp->Base.Parameters);
 
    tgsi_dump(st->fp->tgsi.tokens, 0);
-   if (st->fp->Base.Base.Parameters)
-      _mesa_print_parameter_list(st->fp->Base.Base.Parameters);
+   if (st->fp->Base.Parameters)
+      _mesa_print_parameter_list(st->fp->Base.Parameters);
 }
 
 
@@ -164,15 +165,19 @@ st_debug_message(void *data,
 }
 
 void
-st_enable_debug_output(struct st_context *st, boolean enable)
+st_update_debug_callback(struct st_context *st)
 {
    struct pipe_context *pipe = st->pipe;
 
    if (!pipe->set_debug_callback)
       return;
 
-   if (enable) {
-      struct pipe_debug_callback cb = { st_debug_message, st };
+   if (_mesa_get_debug_state_int(st->ctx, GL_DEBUG_OUTPUT)) {
+      struct pipe_debug_callback cb;
+      memset(&cb, 0, sizeof(cb));
+      cb.async = !_mesa_get_debug_state_int(st->ctx, GL_DEBUG_OUTPUT_SYNCHRONOUS);
+      cb.debug_message = st_debug_message;
+      cb.data = st;
       pipe->set_debug_callback(pipe, &cb);
    } else {
       pipe->set_debug_callback(pipe, NULL);

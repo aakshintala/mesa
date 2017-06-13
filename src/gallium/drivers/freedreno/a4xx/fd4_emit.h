@@ -38,10 +38,6 @@
 
 struct fd_ringbuffer;
 
-void fd4_emit_const(struct fd_ringbuffer *ring, enum shader_t type,
-		uint32_t regid, uint32_t offset, uint32_t sizedwords,
-		const uint32_t *dwords, struct pipe_resource *prsc);
-
 void fd4_emit_gmem_restore_tex(struct fd_ringbuffer *ring,
 		unsigned nr_bufs, struct pipe_surface **bufs);
 
@@ -52,7 +48,7 @@ struct fd4_emit {
 	const struct fd_program_stateobj *prog;
 	const struct pipe_draw_info *info;
 	struct ir3_shader_key key;
-	uint32_t dirty;
+	enum fd_dirty_3d_state dirty;
 
 	uint32_t sprite_coord_enable;  /* bitmask */
 	bool sprite_coord_mode;
@@ -102,7 +98,7 @@ void fd4_emit_vertex_bufs(struct fd_ringbuffer *ring, struct fd4_emit *emit);
 void fd4_emit_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
 		struct fd4_emit *emit);
 
-void fd4_emit_restore(struct fd_context *ctx);
+void fd4_emit_restore(struct fd_batch *batch, struct fd_ringbuffer *ring);
 
 void fd4_emit_init(struct pipe_context *pctx);
 

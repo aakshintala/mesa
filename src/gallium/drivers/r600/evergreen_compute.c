@@ -26,6 +26,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include "ac_binary.h"
 #include "pipe/p_defines.h"
 #include "pipe/p_state.h"
 #include "pipe/p_context.h"
@@ -46,10 +47,6 @@
 #include "evergreen_compute_internal.h"
 #include "compute_memory_pool.h"
 #include "sb/sb_public.h"
-#ifdef HAVE_OPENCL
-#include "radeon/radeon_llvm_util.h"
-#endif
-#include "radeon/radeon_elf_util.h"
 #include <inttypes.h>
 
 /**
@@ -90,9 +87,7 @@ struct r600_resource *r600_compute_buffer_alloc_vram(struct r600_screen *screen,
 	assert(size);
 
 	buffer = pipe_buffer_create((struct pipe_screen*) screen,
-				    PIPE_BIND_CUSTOM,
-				    PIPE_USAGE_IMMUTABLE,
-				    size);
+				    0, PIPE_USAGE_IMMUTABLE, size);
 
 	return (struct r600_resource *)buffer;
 }
@@ -151,8 +146,8 @@ static void evergreen_cs_set_vertex_buffer(struct r600_context *rctx,
 	struct pipe_vertex_buffer *vb = &state->vb[vb_index];
 	vb->stride = 1;
 	vb->buffer_offset = offset;
-	vb->buffer = buffer;
-	vb->user_buffer = NULL;
+	vb->buffer.resource = buffer;
+	vb->is_user_buffer = false;
 
 	/* The vertex instructions in the compute shaders use the texture cache,
 	 * so we need to invalidate it. */
@@ -185,14 +180,14 @@ static void evergreen_cs_set_constant_buffer(struct r600_context *rctx,
 
 #ifdef HAVE_OPENCL
 
-static void r600_shader_binary_read_config(const struct radeon_shader_binary *binary,
+static void r600_shader_binary_read_config(const struct ac_shader_binary *binary,
 					   struct r600_bytecode *bc,
 					   uint64_t symbol_offset,
 					   boolean *use_kill)
 {
        unsigned i;
        const unsigned char *config =
-               radeon_shader_binary_config_start(binary, symbol_offset);
+               ac_shader_binary_config_start(binary, symbol_offset);
 
        for (i = 0; i < binary->config_size_per_symbol; i+= 8) {
                unsigned reg =
@@ -221,7 +216,7 @@ static void r600_shader_binary_read_config(const struct radeon_shader_binary *bi
 }
 
 static unsigned r600_create_shader(struct r600_bytecode *bc,
-				   const struct radeon_shader_binary *binary,
+				   const struct ac_shader_binary *binary,
 				   boolean *use_kill)
 
 {
@@ -242,7 +237,7 @@ static void r600_destroy_shader(struct r600_bytecode *bc)
 }
 
 static void *evergreen_create_compute_state(struct pipe_context *ctx,
-					    const const struct pipe_compute_state *cso)
+					    const struct pipe_compute_state *cso)
 {
 	struct r600_context *rctx = (struct r600_context *)ctx;
 	struct r600_pipe_compute *shader = CALLOC_STRUCT(r600_pipe_compute);
@@ -256,7 +251,7 @@ static void *evergreen_create_compute_state(struct pipe_context *ctx,
 	header = cso->prog;
 	code = cso->prog + sizeof(struct pipe_llvm_program_header);
 	radeon_shader_binary_init(&shader->binary);
-	radeon_elf_read(code, header->num_bytes, &shader->binary);
+	ac_elf_read(code, header->num_bytes, &shader->binary);
 	r600_create_shader(&shader->bc, &shader->binary, &use_kill);
 
 	/* Upload code + ROdata */
@@ -338,7 +333,7 @@ static void evergreen_compute_upload_input(struct pipe_context *ctx,
 	if (!shader->kernel_param) {
 		/* Add space for the grid dimensions */
 		shader->kernel_param = (struct r600_resource *)
-			pipe_buffer_create(ctx->screen, PIPE_BIND_CUSTOM,
+			pipe_buffer_create(ctx->screen, 0,
 					PIPE_USAGE_IMMUTABLE, input_size);
 	}
 
@@ -372,7 +367,11 @@ static void evergreen_compute_upload_input(struct pipe_context *ctx,
 
 	ctx->transfer_unmap(ctx, transfer);
 
-	/* ID=0 is reserved for the parameters */
+	/* ID=0 and ID=3 are reserved for the parameters.
+	 * LLVM will preferably use ID=0, but it does not work for dynamic
+	 * indices. */
+	evergreen_cs_set_vertex_buffer(rctx, 3, 0,
+			(struct pipe_resource*)shader->kernel_param);
 	evergreen_cs_set_constant_buffer(rctx, 0, 0, input_size,
 			(struct pipe_resource*)shader->kernel_param);
 }
@@ -443,6 +442,9 @@ static void evergreen_emit_dispatch(struct r600_context *rctx,
 	radeon_emit(cs, info->grid[2]);
 	/* VGT_DISPATCH_INITIATOR = COMPUTE_SHADER_EN */
 	radeon_emit(cs, 1);
+
+	if (rctx->is_debug)
+		eg_trace_emit(rctx);
 }
 
 static void compute_emit_cs(struct r600_context *rctx,
@@ -583,7 +585,7 @@ void evergreen_emit_cs_shader(struct r600_context *rctx,
 	radeon_emit(cs, PKT3C(PKT3_NOP, 0, 0));
 	radeon_emit(cs, radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx,
 					      code_bo, RADEON_USAGE_READ,
-					      RADEON_PRIO_USER_SHADER));
+					      RADEON_PRIO_SHADER_BINARY));
 }
 
 static void evergreen_launch_grid(struct pipe_context *ctx,
@@ -618,9 +620,9 @@ static void evergreen_set_compute_resources(struct pipe_context *ctx,
 			start, count);
 
 	for (unsigned i = 0; i < count; i++) {
-		/* The First three vertex buffers are reserved for parameters and
+		/* The First four vertex buffers are reserved for parameters and
 		 * global buffers. */
-		unsigned vtx_id = 3 + i;
+		unsigned vtx_id = 4 + i;
 		if (resources[i]) {
 			struct r600_resource_global *buffer =
 				(struct r600_resource_global*)
@@ -868,10 +870,9 @@ void evergreen_init_atom_start_compute_cs(struct r600_context *rctx)
 	r600_store_context_reg(cb, R_028B54_VGT_SHADER_STAGES_EN, 2/*CS_ON*/);
 
 	r600_store_context_reg(cb, R_0286E8_SPI_COMPUTE_INPUT_CNTL,
-						S_0286E8_TID_IN_GROUP_ENA
-						| S_0286E8_TGID_ENA
-						| S_0286E8_DISABLE_INDEX_PACK)
-						;
+			       S_0286E8_TID_IN_GROUP_ENA(1) |
+			       S_0286E8_TGID_ENA(1) |
+			       S_0286E8_DISABLE_INDEX_PACK(1));
 
 	/* The LOOP_CONST registers are an optimizations for loops that allows
 	 * you to store the initial counter, increment value, and maximum
@@ -976,18 +977,6 @@ static void r600_compute_global_transfer_flush_region(struct pipe_context *ctx,
 	assert(0 && "TODO");
 }
 
-static void r600_compute_global_transfer_inline_write(struct pipe_context *pipe,
-						      struct pipe_resource *resource,
-						      unsigned level,
-						      unsigned usage,
-						      const struct pipe_box *box,
-						      const void *data,
-						      unsigned stride,
-						      unsigned layer_stride)
-{
-	assert(0 && "TODO");
-}
-
 static void r600_compute_global_buffer_destroy(struct pipe_screen *screen,
 					       struct pipe_resource *res)
 {
@@ -1013,7 +1002,6 @@ static const struct u_resource_vtbl r600_global_buffer_vtbl =
 	r600_compute_global_transfer_map, /* transfer_map */
 	r600_compute_global_transfer_flush_region,/* transfer_flush_region */
 	r600_compute_global_transfer_unmap, /* transfer_unmap */
-	r600_compute_global_transfer_inline_write /* transfer_inline_write */
 };
 
 struct pipe_resource *r600_compute_global_buffer_create(struct pipe_screen *screen,

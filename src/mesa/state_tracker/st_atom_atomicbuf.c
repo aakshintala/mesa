@@ -41,17 +41,17 @@
 #include "st_program.h"
 
 static void
-st_bind_atomics(struct st_context *st,
-                struct gl_shader_program *prog,
-                unsigned shader_type)
+st_bind_atomics(struct st_context *st, struct gl_program *prog,
+                enum pipe_shader_type shader_type)
 {
    unsigned i;
 
    if (!prog || !st->pipe->set_shader_buffers)
       return;
 
-   for (i = 0; i < prog->NumAtomicBuffers; i++) {
-      struct gl_active_atomic_buffer *atomic = &prog->AtomicBuffers[i];
+   for (i = 0; i < prog->sh.data->NumAtomicBuffers; i++) {
+      struct gl_active_atomic_buffer *atomic =
+         &prog->sh.data->AtomicBuffers[i];
       struct gl_atomic_buffer_binding *binding =
          &st->ctx->AtomicBufferBindings[atomic->Binding];
       struct st_buffer_object *st_obj =
@@ -69,110 +69,56 @@ st_bind_atomics(struct st_context *st,
    }
 }
 
-static void
-bind_vs_atomics(struct st_context *st)
+void
+st_bind_vs_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_VERTEX];
 
    st_bind_atomics(st, prog, PIPE_SHADER_VERTEX);
 }
 
-const struct st_tracked_state st_bind_vs_atomics = {
-   "st_bind_vs_atomics",
-   {
-      0,
-      ST_NEW_VERTEX_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_vs_atomics
-};
-
-static void
-bind_fs_atomics(struct st_context *st)
+void
+st_bind_fs_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_FRAGMENT];
 
    st_bind_atomics(st, prog, PIPE_SHADER_FRAGMENT);
 }
 
-const struct st_tracked_state st_bind_fs_atomics = {
-   "st_bind_fs_atomics",
-   {
-      0,
-      ST_NEW_FRAGMENT_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_fs_atomics
-};
-
-static void
-bind_gs_atomics(struct st_context *st)
+void
+st_bind_gs_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_GEOMETRY];
 
    st_bind_atomics(st, prog, PIPE_SHADER_GEOMETRY);
 }
 
-const struct st_tracked_state st_bind_gs_atomics = {
-   "st_bind_gs_atomics",
-   {
-      0,
-      ST_NEW_GEOMETRY_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_gs_atomics
-};
-
-static void
-bind_tcs_atomics(struct st_context *st)
+void
+st_bind_tcs_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_TESS_CTRL];
 
    st_bind_atomics(st, prog, PIPE_SHADER_TESS_CTRL);
 }
 
-const struct st_tracked_state st_bind_tcs_atomics = {
-   "st_bind_tcs_atomics",
-   {
-      0,
-      ST_NEW_TESSCTRL_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_tcs_atomics
-};
-
-static void
-bind_tes_atomics(struct st_context *st)
+void
+st_bind_tes_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_TESS_EVAL];
 
    st_bind_atomics(st, prog, PIPE_SHADER_TESS_EVAL);
 }
 
-const struct st_tracked_state st_bind_tes_atomics = {
-   "st_bind_tes_atomics",
-   {
-      0,
-      ST_NEW_TESSEVAL_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_tes_atomics
-};
-
-static void
-bind_cs_atomics(struct st_context *st)
+void
+st_bind_cs_atomics(struct st_context *st)
 {
-   struct gl_shader_program *prog =
+   struct gl_program *prog =
       st->ctx->_Shader->CurrentProgram[MESA_SHADER_COMPUTE];
 
    st_bind_atomics(st, prog, PIPE_SHADER_COMPUTE);
 }
-
-const struct st_tracked_state st_bind_cs_atomics = {
-   "st_bind_cs_atomics",
-   {
-      0,
-      ST_NEW_COMPUTE_PROGRAM | ST_NEW_ATOMIC_BUFFER,
-   },
-   bind_cs_atomics
-};

@@ -323,16 +323,14 @@ lp_build_tgsi_inst_llvm(
 
 
 LLVMValueRef
-lp_build_emit_fetch(
+lp_build_emit_fetch_src(
    struct lp_build_tgsi_context *bld_base,
-   const struct tgsi_full_instruction *inst,
-   unsigned src_op,
+   const struct tgsi_full_src_register *reg,
+   enum tgsi_opcode_type stype,
    const unsigned chan_index)
 {
-   const struct tgsi_full_src_register *reg = &inst->Src[src_op];
    unsigned swizzle;
    LLVMValueRef res;
-   enum tgsi_opcode_type stype = tgsi_opcode_infer_src_type(inst->Instruction.Opcode);
 
    if (chan_index == LP_CHAN_ALL) {
       swizzle = ~0u;
@@ -360,10 +358,12 @@ lp_build_emit_fetch(
       case TGSI_TYPE_DOUBLE:
       case TGSI_TYPE_UNTYPED:
           /* modifiers on movs assume data is float */
-         res = lp_build_emit_llvm_unary(bld_base, TGSI_OPCODE_ABS, res);
+         res = lp_build_abs(&bld_base->base, res);
          break;
       case TGSI_TYPE_UNSIGNED:
       case TGSI_TYPE_SIGNED:
+      case TGSI_TYPE_UNSIGNED64:
+      case TGSI_TYPE_SIGNED64:
       case TGSI_TYPE_VOID:
       default:
          /* abs modifier is only legal on floating point types */
@@ -387,6 +387,10 @@ lp_build_emit_fetch(
       case TGSI_TYPE_UNSIGNED:
          res = lp_build_negate( &bld_base->int_bld, res );
          break;
+      case TGSI_TYPE_SIGNED64:
+      case TGSI_TYPE_UNSIGNED64:
+         res = lp_build_negate( &bld_base->int64_bld, res );
+         break;
       case TGSI_TYPE_VOID:
       default:
          assert(0);
@@ -407,7 +411,21 @@ lp_build_emit_fetch(
    }
 
    return res;
+}
 
+
+LLVMValueRef
+lp_build_emit_fetch(
+   struct lp_build_tgsi_context *bld_base,
+   const struct tgsi_full_instruction *inst,
+   unsigned src_op,
+   const unsigned chan_index)
+{
+   const struct tgsi_full_src_register *reg = &inst->Src[src_op];
+   enum tgsi_opcode_type stype =
+      tgsi_opcode_infer_src_type(inst->Instruction.Opcode);
+
+   return lp_build_emit_fetch_src(bld_base, reg, stype, chan_index);
 }
 
 

@@ -11,16 +11,16 @@ env.MSVC2013Compat()
 
 env.Append(CPPPATH = [
     '../compiler/nir',  # for generated nir_opcodes.h, etc
+    '../compiler/glsl',  # for generated headers
     '#/src',
+    Dir('../mapi'), # src/mapi build path
     '#/src/mapi',
-    '#/src/glsl',
+    Dir('.'), # src/mesa build path
     '#/src/mesa',
+    Dir('main'),  # src/mesa/main/ build path
     '#/src/mesa/main',
     '#/src/gallium/include',
     '#/src/gallium/auxiliary',
-    Dir('../mapi'), # src/mapi build path
-    Dir('.'), # src/mesa build path
-    Dir('main'),  # src/mesa/main/ build path
 ])
 
 if env['platform'] == 'windows':
@@ -54,7 +54,7 @@ GLAPI = '#src/mapi/glapi/'
 get_hash_header = env.CodeGenerate(
       target = 'main/get_hash.h',
       script = 'main/get_hash_generator.py',
-      source = GLAPI + 'gen/gl_and_es_API.xml',
+      source = [GLAPI + 'gen/gl_and_es_API.xml'] + env.Glob(GLAPI + 'gen/*.xml'),
       command = python_cmd + ' $SCRIPT ' + ' -f $SOURCE > $TARGET'
 )
 
@@ -115,8 +115,24 @@ if env['platform'] not in ('cygwin', 'darwin', 'windows', 'haiku'):
         )
         # Add the dir containing the generated header (somewhere inside  the
         # build dir) to the include path
-        env.Append(CPPPATH = [matypes[0].dir])
+        env.Prepend(CPPPATH = [matypes[0].dir])
 
+
+# The marshal_generated.c file is generated from the GL/ES API.xml file
+env.CodeGenerate(
+    target = 'main/marshal_generated.c',
+    script = GLAPI + 'gen/gl_marshal.py',
+    source = [GLAPI + 'gen/gl_and_es_API.xml'] + env.Glob(GLAPI + 'gen/*.xml'),
+    command = python_cmd + ' $SCRIPT -f $SOURCE > $TARGET'
+    )
+
+# The marshal_generated.h file is generated from the GL/ES API.xml file
+env.CodeGenerate(
+    target = 'main/marshal_generated.h',
+    script = GLAPI + 'gen/gl_marshal_h.py',
+    source = [GLAPI + 'gen/gl_and_es_API.xml'] + env.Glob(GLAPI + 'gen/*.xml'),
+    command = python_cmd + ' $SCRIPT -f $SOURCE > $TARGET'
+    )
 
 #
 # Libraries

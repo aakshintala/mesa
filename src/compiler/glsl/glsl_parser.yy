@@ -97,6 +97,7 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 
 %union {
    int n;
+   int64_t n64;
    float real;
    double dreal;
    const char *identifier;
@@ -136,6 +137,7 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 %token ATTRIBUTE CONST_TOK BOOL_TOK FLOAT_TOK INT_TOK UINT_TOK DOUBLE_TOK
 %token BREAK BUFFER CONTINUE DO ELSE FOR IF DISCARD RETURN SWITCH CASE DEFAULT
 %token BVEC2 BVEC3 BVEC4 IVEC2 IVEC3 IVEC4 UVEC2 UVEC3 UVEC4 VEC2 VEC3 VEC4 DVEC2 DVEC3 DVEC4
+%token INT64_TOK UINT64_TOK I64VEC2 I64VEC3 I64VEC4 U64VEC2 U64VEC3 U64VEC4
 %token CENTROID IN_TOK OUT_TOK INOUT_TOK UNIFORM VARYING SAMPLE
 %token NOPERSPECTIVE FLAT SMOOTH
 %token MAT2X2 MAT2X3 MAT2X4
@@ -173,6 +175,7 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 %token <real> FLOATCONSTANT
 %token <dreal> DOUBLECONSTANT
 %token <n> INTCONSTANT UINTCONSTANT BOOLCONSTANT
+%token <n64> INT64CONSTANT UINT64CONSTANT
 %token <identifier> FIELD_SELECTION
 %token LEFT_OP RIGHT_OP
 %token INC_OP DEC_OP LE_OP GE_OP EQ_OP NE_OP
@@ -219,8 +222,6 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 %type <type_qualifier> subroutine_qualifier
 %type <subroutine_list> subroutine_type_list
 %type <type_qualifier> interface_qualifier
-%type <type_qualifier> uniform_interface_qualifier
-%type <type_qualifier> buffer_interface_qualifier
 %type <type_specifier> type_specifier
 %type <type_specifier> type_specifier_nonarray
 %type <array_specifier> array_specifier
@@ -299,10 +300,10 @@ static bool match_layout_qualifier(const char *s1, const char *s2,
 %type <node> for_init_statement
 %type <for_rest_statement> for_rest_statement
 %type <node> layout_defaults
-%type <node> layout_uniform_defaults
-%type <node> layout_buffer_defaults
-%type <node> layout_in_defaults
-%type <node> layout_out_defaults
+%type <type_qualifier> layout_uniform_defaults
+%type <type_qualifier> layout_buffer_defaults
+%type <type_qualifier> layout_in_defaults
+%type <type_qualifier> layout_out_defaults
 
 %right THEN ELSE
 %%
@@ -434,42 +435,56 @@ variable_identifier:
 primary_expression:
    variable_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_identifier, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.identifier = $1;
    }
    | INTCONSTANT
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_int_constant, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.int_constant = $1;
    }
    | UINTCONSTANT
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_uint_constant, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.uint_constant = $1;
    }
+   | INT64CONSTANT
+   {
+      void *ctx = state->linalloc;
+      $$ = new(ctx) ast_expression(ast_int64_constant, NULL, NULL, NULL);
+      $$->set_location(@1);
+      $$->primary_expression.int64_constant = $1;
+   }
+   | UINT64CONSTANT
+   {
+      void *ctx = state->linalloc;
+      $$ = new(ctx) ast_expression(ast_uint64_constant, NULL, NULL, NULL);
+      $$->set_location(@1);
+      $$->primary_expression.uint64_constant = $1;
+   }
    | FLOATCONSTANT
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_float_constant, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.float_constant = $1;
    }
    | DOUBLECONSTANT
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_double_constant, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.double_constant = $1;
    }
    | BOOLCONSTANT
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_bool_constant, NULL, NULL, NULL);
       $$->set_location(@1);
       $$->primary_expression.bool_constant = $1;
@@ -484,7 +499,7 @@ postfix_expression:
    primary_expression
    | postfix_expression '[' integer_expression ']'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_array_index, $1, $3, NULL);
       $$->set_location_range(@1, @4);
    }
@@ -494,20 +509,20 @@ postfix_expression:
    }
    | postfix_expression DOT_TOK FIELD_SELECTION
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_field_selection, $1, NULL, NULL);
       $$->set_location_range(@1, @3);
       $$->primary_expression.identifier = $3;
    }
    | postfix_expression INC_OP
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_post_inc, $1, NULL, NULL);
       $$->set_location_range(@1, @2);
    }
    | postfix_expression DEC_OP
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_post_dec, $1, NULL, NULL);
       $$->set_location_range(@1, @2);
    }
@@ -560,13 +575,13 @@ function_call_header:
 function_identifier:
    type_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_function_expression($1);
       $$->set_location(@1);
       }
    | postfix_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_function_expression($1);
       $$->set_location(@1);
       }
@@ -581,19 +596,19 @@ unary_expression:
    postfix_expression
    | INC_OP unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_pre_inc, $2, NULL, NULL);
       $$->set_location(@1);
    }
    | DEC_OP unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_pre_dec, $2, NULL, NULL);
       $$->set_location(@1);
    }
    | unary_operator unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression($1, $2, NULL, NULL);
       $$->set_location_range(@1, @2);
    }
@@ -611,19 +626,19 @@ multiplicative_expression:
    unary_expression
    | multiplicative_expression '*' unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_mul, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | multiplicative_expression '/' unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_div, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | multiplicative_expression '%' unary_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_mod, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -633,13 +648,13 @@ additive_expression:
    multiplicative_expression
    | additive_expression '+' multiplicative_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_add, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | additive_expression '-' multiplicative_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_sub, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -649,13 +664,13 @@ shift_expression:
    additive_expression
    | shift_expression LEFT_OP additive_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_lshift, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | shift_expression RIGHT_OP additive_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_rshift, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -665,25 +680,25 @@ relational_expression:
    shift_expression
    | relational_expression '<' shift_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_less, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | relational_expression '>' shift_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_greater, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | relational_expression LE_OP shift_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_lequal, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | relational_expression GE_OP shift_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_gequal, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -693,13 +708,13 @@ equality_expression:
    relational_expression
    | equality_expression EQ_OP relational_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_equal, $1, $3);
       $$->set_location_range(@1, @3);
    }
    | equality_expression NE_OP relational_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_nequal, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -709,7 +724,7 @@ and_expression:
    equality_expression
    | and_expression '&' equality_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_bit_and, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -719,7 +734,7 @@ exclusive_or_expression:
    and_expression
    | exclusive_or_expression '^' and_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_bit_xor, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -729,7 +744,7 @@ inclusive_or_expression:
    exclusive_or_expression
    | inclusive_or_expression '|' exclusive_or_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_bit_or, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -739,7 +754,7 @@ logical_and_expression:
    inclusive_or_expression
    | logical_and_expression AND_OP inclusive_or_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_logic_and, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -749,7 +764,7 @@ logical_xor_expression:
    logical_and_expression
    | logical_xor_expression XOR_OP logical_and_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_logic_xor, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -759,7 +774,7 @@ logical_or_expression:
    logical_xor_expression
    | logical_or_expression OR_OP logical_xor_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_bin(ast_logic_or, $1, $3);
       $$->set_location_range(@1, @3);
    }
@@ -769,7 +784,7 @@ conditional_expression:
    logical_or_expression
    | logical_or_expression '?' expression ':' assignment_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression(ast_conditional, $1, $3, $5);
       $$->set_location_range(@1, @5);
    }
@@ -779,7 +794,7 @@ assignment_expression:
    conditional_expression
    | unary_expression assignment_operator assignment_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression($2, $1, $3, NULL);
       $$->set_location_range(@1, @3);
    }
@@ -806,7 +821,7 @@ expression:
    }
    | expression ',' assignment_expression
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       if ($1->oper != ast_sequence) {
          $$ = new(ctx) ast_expression(ast_sequence, NULL, NULL, NULL);
          $$->set_location_range(@1, @3);
@@ -840,6 +855,16 @@ declaration:
    }
    | interface_block
    {
+      ast_interface_block *block = (ast_interface_block *) $1;
+      if (block->layout.has_layout() || block->layout.has_memory()) {
+         if (!block->default_layout.merge_qualifier(& @1, state, block->layout, false)) {
+            YYERROR;
+         }
+      }
+      block->layout = block->default_layout;
+      if (!block->layout.push_to_global(& @1, state)) {
+         YYERROR;
+      }
       $$ = $1;
    }
    ;
@@ -869,13 +894,13 @@ function_header_with_parameters:
 function_header:
    fully_specified_type variable_identifier '('
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_function();
       $$->set_location(@2);
       $$->return_type = $1;
       $$->identifier = $2;
 
-      if ($1->qualifier.flags.q.subroutine) {
+      if ($1->qualifier.is_subroutine_decl()) {
          /* add type for IDENTIFIER search */
          state->symbols->add_type($2, glsl_type::get_subroutine_instance($2));
       } else
@@ -887,7 +912,7 @@ function_header:
 parameter_declarator:
    type_specifier any_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_parameter_declarator();
       $$->set_location_range(@1, @2);
       $$->type = new(ctx) ast_fully_specified_type();
@@ -898,7 +923,7 @@ parameter_declarator:
    }
    | type_specifier any_identifier array_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_parameter_declarator();
       $$->set_location_range(@1, @3);
       $$->type = new(ctx) ast_fully_specified_type();
@@ -915,15 +940,21 @@ parameter_declaration:
    {
       $$ = $2;
       $$->type->qualifier = $1;
+      if (!$$->type->qualifier.push_to_global(& @1, state)) {
+         YYERROR;
+      }
    }
    | parameter_qualifier parameter_type_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_parameter_declarator();
       $$->set_location(@2);
       $$->type = new(ctx) ast_fully_specified_type();
       $$->type->set_location_range(@1, @2);
       $$->type->qualifier = $1;
+      if (!$$->type->qualifier.push_to_global(& @1, state)) {
+         YYERROR;
+      }
       $$->type->specifier = $2;
    }
    ;
@@ -1006,7 +1037,7 @@ init_declarator_list:
    single_declaration
    | init_declarator_list ',' any_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($3, NULL, NULL);
       decl->set_location(@3);
 
@@ -1016,7 +1047,7 @@ init_declarator_list:
    }
    | init_declarator_list ',' any_identifier array_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($3, $4, NULL);
       decl->set_location_range(@3, @4);
 
@@ -1026,7 +1057,7 @@ init_declarator_list:
    }
    | init_declarator_list ',' any_identifier array_specifier '=' initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($3, $4, $6);
       decl->set_location_range(@3, @4);
 
@@ -1036,7 +1067,7 @@ init_declarator_list:
    }
    | init_declarator_list ',' any_identifier '=' initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($3, NULL, $5);
       decl->set_location(@3);
 
@@ -1050,14 +1081,14 @@ init_declarator_list:
 single_declaration:
    fully_specified_type
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       /* Empty declaration list is valid. */
       $$ = new(ctx) ast_declarator_list($1);
       $$->set_location(@1);
    }
    | fully_specified_type any_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, NULL, NULL);
       decl->set_location(@2);
 
@@ -1068,7 +1099,7 @@ single_declaration:
    }
    | fully_specified_type any_identifier array_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, $3, NULL);
       decl->set_location_range(@2, @3);
 
@@ -1079,7 +1110,7 @@ single_declaration:
    }
    | fully_specified_type any_identifier array_specifier '=' initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, $3, $5);
       decl->set_location_range(@2, @3);
 
@@ -1090,7 +1121,7 @@ single_declaration:
    }
    | fully_specified_type any_identifier '=' initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, NULL, $4);
       decl->set_location(@2);
 
@@ -1101,7 +1132,7 @@ single_declaration:
    }
    | INVARIANT variable_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, NULL, NULL);
       decl->set_location(@2);
 
@@ -1113,7 +1144,7 @@ single_declaration:
    }
    | PRECISE variable_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, NULL, NULL);
       decl->set_location(@2);
 
@@ -1128,17 +1159,20 @@ single_declaration:
 fully_specified_type:
    type_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_fully_specified_type();
       $$->set_location(@1);
       $$->specifier = $1;
    }
    | type_qualifier type_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_fully_specified_type();
       $$->set_location_range(@1, @2);
       $$->qualifier = $1;
+      if (!$$->qualifier.push_to_global(& @1, state)) {
+         YYERROR;
+      }
       $$->specifier = $2;
       if ($$->specifier->structure != NULL &&
           $$->specifier->structure->is_declaration) {
@@ -1193,14 +1227,18 @@ layout_qualifier_id:
            state->ARB_conservative_depth_enable ||
            state->is_version(420, 0))) {
          if (match_layout_qualifier($1, "depth_any", state) == 0) {
-            $$.flags.q.depth_any = 1;
+            $$.flags.q.depth_type = 1;
+            $$.depth_type = ast_depth_any;
          } else if (match_layout_qualifier($1, "depth_greater", state) == 0) {
-            $$.flags.q.depth_greater = 1;
+            $$.flags.q.depth_type = 1;
+            $$.depth_type = ast_depth_greater;
          } else if (match_layout_qualifier($1, "depth_less", state) == 0) {
-            $$.flags.q.depth_less = 1;
+            $$.flags.q.depth_type = 1;
+            $$.depth_type = ast_depth_less;
          } else if (match_layout_qualifier($1, "depth_unchanged",
                                            state) == 0) {
-            $$.flags.q.depth_unchanged = 1;
+            $$.flags.q.depth_type = 1;
+            $$.depth_type = ast_depth_unchanged;
          }
 
          if ($$.flags.i && state->AMD_conservative_depth_warn) {
@@ -1276,15 +1314,15 @@ layout_qualifier_id:
             }
          }
 
-         if ($$.flags.i && !state->has_geometry_shader()) {
+         if ($$.flags.i && !state->has_geometry_shader() &&
+             !state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state, "#version 150 layout "
                              "qualifier `%s' used", $1);
          }
       }
 
       /* Layout qualifiers for ARB_shader_image_load_store. */
-      if (state->ARB_shader_image_load_store_enable ||
-          state->is_version(420, 310)) {
+      if (state->has_shader_image_load_store()) {
          if (!$$.flags.i) {
             static const struct {
                const char *name;
@@ -1297,51 +1335,55 @@ layout_qualifier_id:
                unsigned required_glsl;
                /** Minimum GLSL ES version required for the image format. */
                unsigned required_essl;
+               /* NV_image_formats */
+               bool nv_image_formats;
             } map[] = {
-               { "rgba32f", GL_RGBA32F, GLSL_TYPE_FLOAT, 130, 310 },
-               { "rgba16f", GL_RGBA16F, GLSL_TYPE_FLOAT, 130, 310 },
-               { "rg32f", GL_RG32F, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rg16f", GL_RG16F, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r11f_g11f_b10f", GL_R11F_G11F_B10F, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r32f", GL_R32F, GLSL_TYPE_FLOAT, 130, 310 },
-               { "r16f", GL_R16F, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rgba32ui", GL_RGBA32UI, GLSL_TYPE_UINT, 130, 310 },
-               { "rgba16ui", GL_RGBA16UI, GLSL_TYPE_UINT, 130, 310 },
-               { "rgb10_a2ui", GL_RGB10_A2UI, GLSL_TYPE_UINT, 130, 0 },
-               { "rgba8ui", GL_RGBA8UI, GLSL_TYPE_UINT, 130, 310 },
-               { "rg32ui", GL_RG32UI, GLSL_TYPE_UINT, 130, 0 },
-               { "rg16ui", GL_RG16UI, GLSL_TYPE_UINT, 130, 0 },
-               { "rg8ui", GL_RG8UI, GLSL_TYPE_UINT, 130, 0 },
-               { "r32ui", GL_R32UI, GLSL_TYPE_UINT, 130, 310 },
-               { "r16ui", GL_R16UI, GLSL_TYPE_UINT, 130, 0 },
-               { "r8ui", GL_R8UI, GLSL_TYPE_UINT, 130, 0 },
-               { "rgba32i", GL_RGBA32I, GLSL_TYPE_INT, 130, 310 },
-               { "rgba16i", GL_RGBA16I, GLSL_TYPE_INT, 130, 310 },
-               { "rgba8i", GL_RGBA8I, GLSL_TYPE_INT, 130, 310 },
-               { "rg32i", GL_RG32I, GLSL_TYPE_INT, 130, 0 },
-               { "rg16i", GL_RG16I, GLSL_TYPE_INT, 130, 0 },
-               { "rg8i", GL_RG8I, GLSL_TYPE_INT, 130, 0 },
-               { "r32i", GL_R32I, GLSL_TYPE_INT, 130, 310 },
-               { "r16i", GL_R16I, GLSL_TYPE_INT, 130, 0 },
-               { "r8i", GL_R8I, GLSL_TYPE_INT, 130, 0 },
-               { "rgba16", GL_RGBA16, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rgb10_a2", GL_RGB10_A2, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rgba8", GL_RGBA8, GLSL_TYPE_FLOAT, 130, 310 },
-               { "rg16", GL_RG16, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rg8", GL_RG8, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r16", GL_R16, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r8", GL_R8, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rgba16_snorm", GL_RGBA16_SNORM, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rgba8_snorm", GL_RGBA8_SNORM, GLSL_TYPE_FLOAT, 130, 310 },
-               { "rg16_snorm", GL_RG16_SNORM, GLSL_TYPE_FLOAT, 130, 0 },
-               { "rg8_snorm", GL_RG8_SNORM, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r16_snorm", GL_R16_SNORM, GLSL_TYPE_FLOAT, 130, 0 },
-               { "r8_snorm", GL_R8_SNORM, GLSL_TYPE_FLOAT, 130, 0 }
+               { "rgba32f", GL_RGBA32F, GLSL_TYPE_FLOAT, 130, 310, false },
+               { "rgba16f", GL_RGBA16F, GLSL_TYPE_FLOAT, 130, 310, false },
+               { "rg32f", GL_RG32F, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "rg16f", GL_RG16F, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "r11f_g11f_b10f", GL_R11F_G11F_B10F, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "r32f", GL_R32F, GLSL_TYPE_FLOAT, 130, 310, false },
+               { "r16f", GL_R16F, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "rgba32ui", GL_RGBA32UI, GLSL_TYPE_UINT, 130, 310, false },
+               { "rgba16ui", GL_RGBA16UI, GLSL_TYPE_UINT, 130, 310, false },
+               { "rgb10_a2ui", GL_RGB10_A2UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "rgba8ui", GL_RGBA8UI, GLSL_TYPE_UINT, 130, 310, false },
+               { "rg32ui", GL_RG32UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "rg16ui", GL_RG16UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "rg8ui", GL_RG8UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "r32ui", GL_R32UI, GLSL_TYPE_UINT, 130, 310, false },
+               { "r16ui", GL_R16UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "r8ui", GL_R8UI, GLSL_TYPE_UINT, 130, 0, true },
+               { "rgba32i", GL_RGBA32I, GLSL_TYPE_INT, 130, 310, false },
+               { "rgba16i", GL_RGBA16I, GLSL_TYPE_INT, 130, 310, false },
+               { "rgba8i", GL_RGBA8I, GLSL_TYPE_INT, 130, 310, false },
+               { "rg32i", GL_RG32I, GLSL_TYPE_INT, 130, 0, true },
+               { "rg16i", GL_RG16I, GLSL_TYPE_INT, 130, 0, true },
+               { "rg8i", GL_RG8I, GLSL_TYPE_INT, 130, 0, true },
+               { "r32i", GL_R32I, GLSL_TYPE_INT, 130, 310, false },
+               { "r16i", GL_R16I, GLSL_TYPE_INT, 130, 0, true },
+               { "r8i", GL_R8I, GLSL_TYPE_INT, 130, 0, true },
+               { "rgba16", GL_RGBA16, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "rgb10_a2", GL_RGB10_A2, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "rgba8", GL_RGBA8, GLSL_TYPE_FLOAT, 130, 310, false },
+               { "rg16", GL_RG16, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "rg8", GL_RG8, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "r16", GL_R16, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "r8", GL_R8, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "rgba16_snorm", GL_RGBA16_SNORM, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "rgba8_snorm", GL_RGBA8_SNORM, GLSL_TYPE_FLOAT, 130, 310, false },
+               { "rg16_snorm", GL_RG16_SNORM, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "rg8_snorm", GL_RG8_SNORM, GLSL_TYPE_FLOAT, 130, 0, true },
+               { "r16_snorm", GL_R16_SNORM, GLSL_TYPE_FLOAT, 130, 0, false },
+               { "r8_snorm", GL_R8_SNORM, GLSL_TYPE_FLOAT, 130, 0, true }
             };
 
             for (unsigned i = 0; i < ARRAY_SIZE(map); i++) {
-               if (state->is_version(map[i].required_glsl,
-                                     map[i].required_essl) &&
+               if ((state->is_version(map[i].required_glsl,
+                                      map[i].required_essl) ||
+                    (state->NV_image_formats_enable &&
+                     map[i].nv_image_formats)) &&
                    match_layout_qualifier($1, map[i].name, state) == 0) {
                   $$.flags.q.explicit_image_format = 1;
                   $$.image_format = map[i].format;
@@ -1350,9 +1392,10 @@ layout_qualifier_id:
                }
             }
          }
+      }
 
-         if (!$$.flags.i &&
-             match_layout_qualifier($1, "early_fragment_tests", state) == 0) {
+      if (!$$.flags.i) {
+         if (match_layout_qualifier($1, "early_fragment_tests", state) == 0) {
             /* From section 4.4.1.3 of the GLSL 4.50 specification
              * (Fragment Shader Inputs):
              *
@@ -1370,11 +1413,52 @@ layout_qualifier_id:
 
             $$.flags.q.early_fragment_tests = 1;
          }
+
+         if (match_layout_qualifier($1, "inner_coverage", state) == 0) {
+            if (state->stage != MESA_SHADER_FRAGMENT) {
+               _mesa_glsl_error(& @1, state,
+                                "inner_coverage layout qualifier only "
+                                "valid in fragment shaders");
+            }
+
+	    if (state->INTEL_conservative_rasterization_enable) {
+	       $$.flags.q.inner_coverage = 1;
+	    } else {
+	       _mesa_glsl_error(& @1, state,
+                                "inner_coverage layout qualifier present, "
+                                "but the INTEL_conservative_rasterization extension "
+                                "is not enabled.");
+            }
+         }
+
+         if (match_layout_qualifier($1, "post_depth_coverage", state) == 0) {
+            if (state->stage != MESA_SHADER_FRAGMENT) {
+               _mesa_glsl_error(& @1, state,
+                                "post_depth_coverage layout qualifier only "
+                                "valid in fragment shaders");
+            }
+
+            if (state->ARB_post_depth_coverage_enable ||
+		state->INTEL_conservative_rasterization_enable) {
+               $$.flags.q.post_depth_coverage = 1;
+            } else {
+               _mesa_glsl_error(& @1, state,
+                                "post_depth_coverage layout qualifier present, "
+                                "but the GL_ARB_post_depth_coverage extension "
+                                "is not enabled.");
+            }
+         }
+
+         if ($$.flags.q.post_depth_coverage && $$.flags.q.inner_coverage) {
+            _mesa_glsl_error(& @1, state,
+                             "post_depth_coverage & inner_coverage layout qualifiers "
+                             "are mutually exclusive");
+         }
       }
 
       /* Layout qualifiers for tessellation evaluation shaders. */
       if (!$$.flags.i) {
-         struct {
+         static const struct {
             const char *s;
             GLenum e;
          } map[] = {
@@ -1390,22 +1474,20 @@ layout_qualifier_id:
             }
          }
 
-         if ($$.flags.i &&
-             !state->ARB_tessellation_shader_enable &&
-             !state->is_version(400, 0)) {
+         if ($$.flags.i && !state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state,
                              "primitive mode qualifier `%s' requires "
                              "GLSL 4.00 or ARB_tessellation_shader", $1);
          }
       }
       if (!$$.flags.i) {
-         struct {
+         static const struct {
             const char *s;
-            GLenum e;
+            enum gl_tess_spacing e;
          } map[] = {
-                 { "equal_spacing", GL_EQUAL },
-                 { "fractional_odd_spacing", GL_FRACTIONAL_ODD },
-                 { "fractional_even_spacing", GL_FRACTIONAL_EVEN },
+                 { "equal_spacing", TESS_SPACING_EQUAL },
+                 { "fractional_odd_spacing", TESS_SPACING_FRACTIONAL_ODD },
+                 { "fractional_even_spacing", TESS_SPACING_FRACTIONAL_EVEN },
          };
          for (unsigned i = 0; i < ARRAY_SIZE(map); i++) {
             if (match_layout_qualifier($1, map[i].s, state) == 0) {
@@ -1415,9 +1497,7 @@ layout_qualifier_id:
             }
          }
 
-         if ($$.flags.i &&
-             !state->ARB_tessellation_shader_enable &&
-             !state->is_version(400, 0)) {
+         if ($$.flags.i && !state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state,
                              "vertex spacing qualifier `%s' requires "
                              "GLSL 4.00 or ARB_tessellation_shader", $1);
@@ -1432,9 +1512,7 @@ layout_qualifier_id:
             $$.ordering = GL_CCW;
          }
 
-         if ($$.flags.i &&
-             !state->ARB_tessellation_shader_enable &&
-             !state->is_version(400, 0)) {
+         if ($$.flags.i && !state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state,
                              "ordering qualifier `%s' requires "
                              "GLSL 4.00 or ARB_tessellation_shader", $1);
@@ -1446,12 +1524,89 @@ layout_qualifier_id:
             $$.point_mode = true;
          }
 
-         if ($$.flags.i &&
-             !state->ARB_tessellation_shader_enable &&
-             !state->is_version(400, 0)) {
+         if ($$.flags.i && !state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state,
                              "qualifier `point_mode' requires "
                              "GLSL 4.00 or ARB_tessellation_shader");
+         }
+      }
+
+      if (!$$.flags.i) {
+         static const struct {
+            const char *s;
+            uint32_t mask;
+         } map[] = {
+                 { "blend_support_multiply",       BLEND_MULTIPLY },
+                 { "blend_support_screen",         BLEND_SCREEN },
+                 { "blend_support_overlay",        BLEND_OVERLAY },
+                 { "blend_support_darken",         BLEND_DARKEN },
+                 { "blend_support_lighten",        BLEND_LIGHTEN },
+                 { "blend_support_colordodge",     BLEND_COLORDODGE },
+                 { "blend_support_colorburn",      BLEND_COLORBURN },
+                 { "blend_support_hardlight",      BLEND_HARDLIGHT },
+                 { "blend_support_softlight",      BLEND_SOFTLIGHT },
+                 { "blend_support_difference",     BLEND_DIFFERENCE },
+                 { "blend_support_exclusion",      BLEND_EXCLUSION },
+                 { "blend_support_hsl_hue",        BLEND_HSL_HUE },
+                 { "blend_support_hsl_saturation", BLEND_HSL_SATURATION },
+                 { "blend_support_hsl_color",      BLEND_HSL_COLOR },
+                 { "blend_support_hsl_luminosity", BLEND_HSL_LUMINOSITY },
+                 { "blend_support_all_equations",  BLEND_ALL },
+         };
+         for (unsigned i = 0; i < ARRAY_SIZE(map); i++) {
+            if (match_layout_qualifier($1, map[i].s, state) == 0) {
+               $$.flags.q.blend_support = 1;
+               state->fs_blend_support |= map[i].mask;
+               break;
+            }
+         }
+
+         if ($$.flags.i &&
+             !state->KHR_blend_equation_advanced_enable &&
+             !state->is_version(0, 320)) {
+            _mesa_glsl_error(& @1, state,
+                             "advanced blending layout qualifiers require "
+                             "ESSL 3.20 or KHR_blend_equation_advanced");
+         }
+
+         if ($$.flags.i && state->stage != MESA_SHADER_FRAGMENT) {
+            _mesa_glsl_error(& @1, state,
+                             "advanced blending layout qualifiers only "
+                             "valid in fragment shaders");
+         }
+      }
+
+      /* Layout qualifiers for ARB_compute_variable_group_size. */
+      if (!$$.flags.i) {
+         if (match_layout_qualifier($1, "local_size_variable", state) == 0) {
+            $$.flags.q.local_size_variable = 1;
+         }
+
+         if ($$.flags.i && !state->ARB_compute_variable_group_size_enable) {
+            _mesa_glsl_error(& @1, state,
+                             "qualifier `local_size_variable` requires "
+                             "ARB_compute_variable_group_size");
+         }
+      }
+
+      /* Layout qualifiers for ARB_bindless_texture. */
+      if (!$$.flags.i) {
+         if (match_layout_qualifier($1, "bindless_sampler", state) == 0)
+            $$.flags.q.bindless_sampler = 1;
+         if (match_layout_qualifier($1, "bound_sampler", state) == 0)
+            $$.flags.q.bound_sampler = 1;
+
+         if (state->has_shader_image_load_store()) {
+            if (match_layout_qualifier($1, "bindless_image", state) == 0)
+               $$.flags.q.bindless_image = 1;
+            if (match_layout_qualifier($1, "bound_image", state) == 0)
+               $$.flags.q.bound_image = 1;
+         }
+
+         if ($$.flags.i && !state->has_bindless()) {
+            _mesa_glsl_error(& @1, state,
+                             "qualifier `%s` requires "
+                             "ARB_bindless_texture", $1);
          }
       }
 
@@ -1464,7 +1619,7 @@ layout_qualifier_id:
    | any_identifier '=' constant_expression
    {
       memset(& $$, 0, sizeof($$));
-      void *ctx = state;
+      void *ctx = state->linalloc;
 
       if ($3->oper != ast_int_constant &&
           $3->oper != ast_uint_constant &&
@@ -1596,8 +1751,10 @@ layout_qualifier_id:
       if (match_layout_qualifier("invocations", $1, state) == 0) {
          $$.flags.q.invocations = 1;
          $$.invocations = new(ctx) ast_layout_expression(@1, $3);
-         if (!state->is_version(400, 0) &&
-             !state->ARB_gpu_shader5_enable) {
+         if (!state->is_version(400, 320) &&
+             !state->ARB_gpu_shader5_enable &&
+             !state->OES_geometry_shader_enable &&
+             !state->EXT_geometry_shader_enable) {
             _mesa_glsl_error(& @3, state,
                              "GL_ARB_gpu_shader5 invocations "
                              "qualifier specified", $3);
@@ -1608,8 +1765,7 @@ layout_qualifier_id:
       if (match_layout_qualifier("vertices", $1, state) == 0) {
          $$.flags.q.vertices = 1;
          $$.vertices = new(ctx) ast_layout_expression(@1, $3);
-         if (!state->ARB_tessellation_shader_enable &&
-             !state->is_version(400, 0)) {
+         if (!state->has_tessellation_shader()) {
             _mesa_glsl_error(& @1, state,
                              "vertices qualifier requires GLSL 4.00 or "
                              "ARB_tessellation_shader");
@@ -1677,7 +1833,7 @@ subroutine_qualifier:
    | SUBROUTINE '(' subroutine_type_list ')'
    {
       memset(& $$, 0, sizeof($$));
-      $$.flags.q.subroutine_def = 1;
+      $$.flags.q.subroutine = 1;
       $$.subroutine_list = $3;
    }
    ;
@@ -1685,7 +1841,7 @@ subroutine_qualifier:
 subroutine_type_list:
    any_identifier
    {
-        void *ctx = state;
+        void *ctx = state->linalloc;
         ast_declaration *decl = new(ctx)  ast_declaration($1, NULL, NULL);
         decl->set_location(@1);
 
@@ -1694,7 +1850,7 @@ subroutine_type_list:
    }
    | subroutine_type_list ',' any_identifier
    {
-        void *ctx = state;
+        void *ctx = state->linalloc;
         ast_declaration *decl = new(ctx)  ast_declaration($3, NULL, NULL);
         decl->set_location(@3);
 
@@ -1784,8 +1940,10 @@ type_qualifier:
        * variables. As only outputs can be declared as invariant, an invariant
        * output from one shader stage will still match an input of a subsequent
        * stage without the input being declared as invariant."
+       *
+       * On the desktop side, this text first appears in GLSL 4.30.
        */
-      if (state->es_shader && state->language_version >= 300 && $$.flags.q.in)
+      if (state->is_version(430, 300) && $$.flags.q.in)
          _mesa_glsl_error(&@1, state, "invariant qualifiers cannot be used with shader inputs");
    }
    | interpolation_qualifier type_qualifier
@@ -1823,11 +1981,8 @@ type_qualifier:
        * precise qualifiers since these are useful in ARB_separate_shader_objects.
        * There is no clear spec guidance on this either.
        */
-      if (!state->has_420pack_or_es31() && $2.has_layout())
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
-
       $$ = $1;
-      $$.merge_qualifier(&@1, state, $2, false);
+      $$.merge_qualifier(& @1, state, $2, false, $2.has_layout());
    }
    | subroutine_qualifier type_qualifier
    {
@@ -1952,6 +2107,18 @@ storage_qualifier:
           $$.xfb_buffer = state->out_qualifier->xfb_buffer;
       }
    }
+   | INOUT_TOK
+   {
+      memset(& $$, 0, sizeof($$));
+      $$.flags.q.in = 1;
+      $$.flags.q.out = 1;
+
+      if (!state->has_framebuffer_fetch() ||
+          !state->is_version(130, 300) ||
+          state->stage != MESA_SHADER_FRAGMENT)
+         _mesa_glsl_error(&@1, state, "A single interface variable cannot be "
+                          "declared as both input and output");
+   }
    | UNIFORM
    {
       memset(& $$, 0, sizeof($$));
@@ -2001,7 +2168,7 @@ memory_qualifier:
 array_specifier:
    '[' ']'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_array_specifier(@1, new(ctx) ast_expression(
                                                   ast_unsized_array_dim, NULL,
                                                   NULL, NULL));
@@ -2009,13 +2176,13 @@ array_specifier:
    }
    | '[' constant_expression ']'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_array_specifier(@1, $2);
       $$->set_location_range(@1, @3);
    }
    | array_specifier '[' ']'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = $1;
 
       if (state->check_arrays_of_arrays_allowed(& @1)) {
@@ -2045,19 +2212,19 @@ type_specifier:
 type_specifier_nonarray:
    basic_type_specifier_nonarray
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_type_specifier($1);
       $$->set_location(@1);
    }
    | struct_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_type_specifier($1);
       $$->set_location(@1);
    }
    | TYPE_IDENTIFIER
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_type_specifier($1);
       $$->set_location(@1);
    }
@@ -2178,6 +2345,14 @@ basic_type_specifier_nonarray:
    | UIMAGE2DMS             { $$ = "uimage2DMS"; }
    | UIMAGE2DMSARRAY        { $$ = "uimage2DMSArray"; }
    | ATOMIC_UINT            { $$ = "atomic_uint"; }
+   | INT64_TOK              { $$ = "int64_t";	   }
+   | I64VEC2                { $$ = "i64vec2";	   }
+   | I64VEC3                { $$ = "i64vec3";	   }
+   | I64VEC4                { $$ = "i64vec4";	   }
+   | UINT64_TOK             { $$ = "uint64_t";	   }
+   | U64VEC2                { $$ = "u64vec2";	   }
+   | U64VEC3                { $$ = "u64vec3";	   }
+   | U64VEC4                { $$ = "u64vec4";	   }
    ;
 
 precision_qualifier:
@@ -2201,15 +2376,15 @@ precision_qualifier:
 struct_specifier:
    STRUCT any_identifier '{' struct_declaration_list '}'
    {
-      void *ctx = state;
-      $$ = new(ctx) ast_struct_specifier($2, $4);
+      void *ctx = state->linalloc;
+      $$ = new(ctx) ast_struct_specifier(ctx, $2, $4);
       $$->set_location_range(@2, @5);
       state->symbols->add_type($2, glsl_type::void_type);
    }
    | STRUCT '{' struct_declaration_list '}'
    {
-      void *ctx = state;
-      $$ = new(ctx) ast_struct_specifier(NULL, $3);
+      void *ctx = state->linalloc;
+      $$ = new(ctx) ast_struct_specifier(ctx, NULL, $3);
       $$->set_location_range(@2, @4);
    }
    ;
@@ -2230,14 +2405,33 @@ struct_declaration_list:
 struct_declaration:
    fully_specified_type struct_declarator_list ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_fully_specified_type *const type = $1;
       type->set_location(@1);
 
-      if (type->qualifier.flags.i != 0)
-         _mesa_glsl_error(&@1, state,
-			  "only precision qualifiers may be applied to "
-			  "structure members");
+      if (state->has_bindless()) {
+         ast_type_qualifier input_layout_mask;
+
+         /* Allow to declare qualifiers for images. */
+         input_layout_mask.flags.i = 0;
+         input_layout_mask.flags.q.coherent = 1;
+         input_layout_mask.flags.q._volatile = 1;
+         input_layout_mask.flags.q.restrict_flag = 1;
+         input_layout_mask.flags.q.read_only = 1;
+         input_layout_mask.flags.q.write_only = 1;
+         input_layout_mask.flags.q.explicit_image_format = 1;
+
+         if ((type->qualifier.flags.i & ~input_layout_mask.flags.i) != 0) {
+            _mesa_glsl_error(&@1, state,
+                             "only precision and image qualifiers may be "
+                             "applied to structure members");
+         }
+      } else {
+         if (type->qualifier.flags.i != 0)
+            _mesa_glsl_error(&@1, state,
+                             "only precision qualifiers may be applied to "
+                             "structure members");
+      }
 
       $$ = new(ctx) ast_declarator_list(type);
       $$->set_location(@2);
@@ -2262,13 +2456,13 @@ struct_declarator_list:
 struct_declarator:
    any_identifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_declaration($1, NULL, NULL);
       $$->set_location(@1);
    }
    | any_identifier array_specifier
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_declaration($1, $2, NULL);
       $$->set_location_range(@1, @2);
    }
@@ -2289,7 +2483,7 @@ initializer:
 initializer_list:
    initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_aggregate_initializer();
       $$->set_location(@1);
       $$->expressions.push_tail(& $1->link);
@@ -2323,7 +2517,7 @@ simple_statement:
 compound_statement:
    '{' '}'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_compound_statement(true, NULL);
       $$->set_location_range(@1, @2);
    }
@@ -2333,7 +2527,7 @@ compound_statement:
    }
    statement_list '}'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_compound_statement(true, $3);
       $$->set_location_range(@1, @4);
       state->symbols->pop_scope();
@@ -2348,13 +2542,13 @@ statement_no_new_scope:
 compound_statement_no_new_scope:
    '{' '}'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_compound_statement(false, NULL);
       $$->set_location_range(@1, @2);
    }
    | '{' statement_list '}'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_compound_statement(false, $2);
       $$->set_location_range(@1, @3);
    }
@@ -2385,13 +2579,13 @@ statement_list:
 expression_statement:
    ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_statement(NULL);
       $$->set_location(@1);
    }
    | expression ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_expression_statement($1);
       $$->set_location(@1);
    }
@@ -2400,8 +2594,8 @@ expression_statement:
 selection_statement:
    IF '(' expression ')' selection_rest_statement
    {
-      $$ = new(state) ast_selection_statement($3, $5.then_statement,
-                                              $5.else_statement);
+      $$ = new(state->linalloc) ast_selection_statement($3, $5.then_statement,
+                                                        $5.else_statement);
       $$->set_location_range(@1, @5);
    }
    ;
@@ -2426,7 +2620,7 @@ condition:
    }
    | fully_specified_type any_identifier '=' initializer
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_declaration *decl = new(ctx) ast_declaration($2, NULL, $4);
       ast_declarator_list *declarator = new(ctx) ast_declarator_list($1);
       decl->set_location_range(@2, @4);
@@ -2444,7 +2638,7 @@ condition:
 switch_statement:
    SWITCH '(' expression ')' switch_body
    {
-      $$ = new(state) ast_switch_statement($3, $5);
+      $$ = new(state->linalloc) ast_switch_statement($3, $5);
       $$->set_location_range(@1, @5);
    }
    ;
@@ -2452,12 +2646,12 @@ switch_statement:
 switch_body:
    '{' '}'
    {
-      $$ = new(state) ast_switch_body(NULL);
+      $$ = new(state->linalloc) ast_switch_body(NULL);
       $$->set_location_range(@1, @2);
    }
    | '{' case_statement_list '}'
    {
-      $$ = new(state) ast_switch_body($2);
+      $$ = new(state->linalloc) ast_switch_body($2);
       $$->set_location_range(@1, @3);
    }
    ;
@@ -2465,12 +2659,12 @@ switch_body:
 case_label:
    CASE expression ':'
    {
-      $$ = new(state) ast_case_label($2);
+      $$ = new(state->linalloc) ast_case_label($2);
       $$->set_location(@2);
    }
    | DEFAULT ':'
    {
-      $$ = new(state) ast_case_label(NULL);
+      $$ = new(state->linalloc) ast_case_label(NULL);
       $$->set_location(@2);
    }
    ;
@@ -2478,7 +2672,7 @@ case_label:
 case_label_list:
    case_label
    {
-      ast_case_label_list *labels = new(state) ast_case_label_list();
+      ast_case_label_list *labels = new(state->linalloc) ast_case_label_list();
 
       labels->labels.push_tail(& $1->link);
       $$ = labels;
@@ -2494,7 +2688,7 @@ case_label_list:
 case_statement:
    case_label_list statement
    {
-      ast_case_statement *stmts = new(state) ast_case_statement($1);
+      ast_case_statement *stmts = new(state->linalloc) ast_case_statement($1);
       stmts->set_location(@2);
 
       stmts->stmts.push_tail(& $2->link);
@@ -2510,7 +2704,7 @@ case_statement:
 case_statement_list:
    case_statement
    {
-      ast_case_statement_list *cases= new(state) ast_case_statement_list();
+      ast_case_statement_list *cases= new(state->linalloc) ast_case_statement_list();
       cases->set_location(@1);
 
       cases->cases.push_tail(& $1->link);
@@ -2526,21 +2720,21 @@ case_statement_list:
 iteration_statement:
    WHILE '(' condition ')' statement_no_new_scope
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_iteration_statement(ast_iteration_statement::ast_while,
                                             NULL, $3, NULL, $5);
       $$->set_location_range(@1, @4);
    }
    | DO statement WHILE '(' expression ')' ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_iteration_statement(ast_iteration_statement::ast_do_while,
                                             NULL, $5, NULL, $2);
       $$->set_location_range(@1, @6);
    }
    | FOR '(' for_init_statement for_rest_statement ')' statement_no_new_scope
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_iteration_statement(ast_iteration_statement::ast_for,
                                             $3, $4.cond, $4.rest, $6);
       $$->set_location_range(@1, @6);
@@ -2577,31 +2771,31 @@ for_rest_statement:
 jump_statement:
    CONTINUE ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_jump_statement(ast_jump_statement::ast_continue, NULL);
       $$->set_location(@1);
    }
    | BREAK ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_jump_statement(ast_jump_statement::ast_break, NULL);
       $$->set_location(@1);
    }
    | RETURN ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_jump_statement(ast_jump_statement::ast_return, NULL);
       $$->set_location(@1);
    }
    | RETURN expression ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_jump_statement(ast_jump_statement::ast_return, $2);
       $$->set_location_range(@1, @2);
    }
    | DISCARD ';' // Fragment shader only.
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_jump_statement(ast_jump_statement::ast_discard, NULL);
       $$->set_location(@1);
    }
@@ -2617,7 +2811,7 @@ external_declaration:
 function_definition:
    function_prototype compound_statement_no_new_scope
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       $$ = new(ctx) ast_function_definition();
       $$->set_location_range(@1, @2);
       $$->prototype = $1;
@@ -2637,17 +2831,12 @@ interface_block:
    {
       ast_interface_block *block = (ast_interface_block *) $2;
 
-      if (!state->has_420pack_or_es31() && block->layout.has_layout() &&
-          !block->layout.is_default_qualifier) {
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
+      if (!$1.merge_qualifier(& @1, state, block->layout, false,
+                              block->layout.has_layout())) {
          YYERROR;
       }
 
-      if (!block->layout.merge_qualifier(& @1, state, $1, false)) {
-         YYERROR;
-      }
-
-      block->layout.is_default_qualifier = false;
+      block->layout = $1;
 
       $$ = block;
    }
@@ -2655,14 +2844,15 @@ interface_block:
    {
       ast_interface_block *block = (ast_interface_block *)$2;
 
-      if (!block->layout.flags.q.buffer) {
+      if (!block->default_layout.flags.q.buffer) {
             _mesa_glsl_error(& @1, state,
                              "memory qualifiers can only be used in the "
                              "declaration of shader storage blocks");
       }
-      if (!block->layout.merge_qualifier(& @1, state, $1, false)) {
+      if (!$1.merge_qualifier(& @1, state, block->layout, false)) {
          YYERROR;
       }
+      block->layout = $1;
       $$ = block;
    }
    ;
@@ -2672,30 +2862,11 @@ basic_interface_block:
    {
       ast_interface_block *const block = $6;
 
-      block->block_name = $2;
-      block->declarations.push_degenerate_list_at_head(& $4->link);
-
-      _mesa_ast_process_interface_block(& @1, state, block, $1);
-
-      $$ = block;
-   }
-   | uniform_interface_qualifier NEW_IDENTIFIER '{' member_list '}' instance_name_opt ';'
-   {
-      ast_interface_block *const block = $6;
-
-      block->layout = *state->default_uniform_qualifier;
-      block->block_name = $2;
-      block->declarations.push_degenerate_list_at_head(& $4->link);
-
-      _mesa_ast_process_interface_block(& @1, state, block, $1);
-
-      $$ = block;
-   }
-   | buffer_interface_qualifier NEW_IDENTIFIER '{' member_list '}' instance_name_opt ';'
-   {
-      ast_interface_block *const block = $6;
-
-      block->layout = *state->default_shader_storage_qualifier;
+      if ($1.flags.q.uniform) {
+         block->default_layout = *state->default_uniform_qualifier;
+      } else if ($1.flags.q.buffer) {
+         block->default_layout = *state->default_shader_storage_qualifier;
+      }
       block->block_name = $2;
       block->declarations.push_degenerate_list_at_head(& $4->link);
 
@@ -2716,37 +2887,42 @@ interface_qualifier:
       memset(& $$, 0, sizeof($$));
       $$.flags.q.out = 1;
    }
-   ;
-
-uniform_interface_qualifier:
-   UNIFORM
+   | UNIFORM
    {
       memset(& $$, 0, sizeof($$));
       $$.flags.q.uniform = 1;
    }
-   ;
-
-buffer_interface_qualifier:
-   BUFFER
+   | BUFFER
    {
       memset(& $$, 0, sizeof($$));
       $$.flags.q.buffer = 1;
+   }
+   | auxiliary_storage_qualifier interface_qualifier
+   {
+      if (!$1.flags.q.patch) {
+         _mesa_glsl_error(&@1, state, "invalid interface qualifier");
+      }
+      if ($2.has_auxiliary_storage()) {
+         _mesa_glsl_error(&@1, state, "duplicate patch qualifier");
+      }
+      $$ = $2;
+      $$.flags.q.patch = 1;
    }
    ;
 
 instance_name_opt:
    /* empty */
    {
-      $$ = new(state) ast_interface_block(NULL, NULL);
+      $$ = new(state->linalloc) ast_interface_block(NULL, NULL);
    }
    | NEW_IDENTIFIER
    {
-      $$ = new(state) ast_interface_block($1, NULL);
+      $$ = new(state->linalloc) ast_interface_block($1, NULL);
       $$->set_location(@1);
    }
    | NEW_IDENTIFIER array_specifier
    {
-      $$ = new(state) ast_interface_block($1, $2);
+      $$ = new(state->linalloc) ast_interface_block($1, $2);
       $$->set_location_range(@1, @2);
    }
    ;
@@ -2767,7 +2943,7 @@ member_list:
 member_declaration:
    fully_specified_type struct_declarator_list ';'
    {
-      void *ctx = state;
+      void *ctx = state->linalloc;
       ast_fully_specified_type *type = $1;
       type->set_location(@1);
 
@@ -2791,45 +2967,85 @@ member_declaration:
 layout_uniform_defaults:
    layout_qualifier layout_uniform_defaults
    {
-      $$ = NULL;
-      if (!state->has_420pack_or_es31()) {
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
+      $$ = $1;
+      if (!$$.merge_qualifier(& @1, state, $2, false, true)) {
          YYERROR;
-      } else {
-         if (!state->default_uniform_qualifier->
-                merge_qualifier(& @1, state, $1, false)) {
-            YYERROR;
-         }
       }
    }
    | layout_qualifier UNIFORM ';'
-   {
-      if (!state->default_uniform_qualifier->
-             merge_qualifier(& @1, state, $1, false)) {
-         YYERROR;
-      }
-      $$ = NULL;
-   }
    ;
 
 layout_buffer_defaults:
    layout_qualifier layout_buffer_defaults
    {
-      $$ = NULL;
-      if (!state->has_420pack_or_es31()) {
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
+      $$ = $1;
+      if (!$$.merge_qualifier(& @1, state, $2, false, true)) {
          YYERROR;
-      } else {
-         if (!state->default_shader_storage_qualifier->
-                merge_qualifier(& @1, state, $1, false)) {
-            YYERROR;
-         }
       }
    }
    | layout_qualifier BUFFER ';'
+   ;
+
+layout_in_defaults:
+   layout_qualifier layout_in_defaults
    {
+      $$ = $1;
+      if (!$$.merge_qualifier(& @1, state, $2, false, true)) {
+         YYERROR;
+      }
+      if (!$$.validate_in_qualifier(& @1, state)) {
+         YYERROR;
+      }
+   }
+   | layout_qualifier IN_TOK ';'
+   {
+      if (!$1.validate_in_qualifier(& @1, state)) {
+         YYERROR;
+      }
+   }
+   ;
+
+layout_out_defaults:
+   layout_qualifier layout_out_defaults
+   {
+      $$ = $1;
+      if (!$$.merge_qualifier(& @1, state, $2, false, true)) {
+         YYERROR;
+      }
+      if (!$$.validate_out_qualifier(& @1, state)) {
+         YYERROR;
+      }
+   }
+   | layout_qualifier OUT_TOK ';'
+   {
+      if (!$1.validate_out_qualifier(& @1, state)) {
+         YYERROR;
+      }
+   }
+   ;
+
+layout_defaults:
+   layout_uniform_defaults
+   {
+      $$ = NULL;
+      if (!state->default_uniform_qualifier->
+             merge_qualifier(& @1, state, $1, false)) {
+         YYERROR;
+      }
+      if (!state->default_uniform_qualifier->
+             push_to_global(& @1, state)) {
+         YYERROR;
+      }
+   }
+   | layout_buffer_defaults
+   {
+      $$ = NULL;
       if (!state->default_shader_storage_qualifier->
              merge_qualifier(& @1, state, $1, false)) {
+         YYERROR;
+      }
+      if (!state->default_shader_storage_qualifier->
+             push_to_global(& @1, state)) {
          YYERROR;
       }
 
@@ -2842,63 +3058,25 @@ layout_buffer_defaults:
          _mesa_glsl_error(& @1, state,
                           "binding qualifier cannot be set for default layout");
       }
-
-      $$ = NULL;
    }
-   ;
-
-layout_in_defaults:
-   layout_qualifier layout_in_defaults
-   {
-      $$ = NULL;
-      if (!state->has_420pack_or_es31()) {
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
-         YYERROR;
-      } else {
-         if (!state->in_qualifier->
-                merge_in_qualifier(& @1, state, $1, $$, false)) {
-            YYERROR;
-         }
-         $$ = $2;
-      }
-   }
-   | layout_qualifier IN_TOK ';'
-   {
-      $$ = NULL;
-      if (!state->in_qualifier->
-             merge_in_qualifier(& @1, state, $1, $$, true)) {
-         YYERROR;
-      }
-   }
-   ;
-
-layout_out_defaults:
-   layout_qualifier layout_out_defaults
-   {
-      $$ = NULL;
-      if (!state->has_420pack_or_es31()) {
-         _mesa_glsl_error(&@1, state, "duplicate layout(...) qualifiers");
-         YYERROR;
-      } else {
-         if (!state->out_qualifier->
-                merge_out_qualifier(& @1, state, $1, $$, false)) {
-            YYERROR;
-         }
-         $$ = $2;
-      }
-   }
-   | layout_qualifier OUT_TOK ';'
-   {
-      $$ = NULL;
-      if (!state->out_qualifier->
-             merge_out_qualifier(& @1, state, $1, $$, true))
-         YYERROR;
-   }
-   ;
-
-layout_defaults:
-   layout_uniform_defaults
-   | layout_buffer_defaults
    | layout_in_defaults
+   {
+      $$ = NULL;
+      if (!$1.merge_into_in_qualifier(& @1, state, $$)) {
+         YYERROR;
+      }
+      if (!state->in_qualifier->push_to_global(& @1, state)) {
+         YYERROR;
+      }
+   }
    | layout_out_defaults
+   {
+      $$ = NULL;
+      if (!$1.merge_into_out_qualifier(& @1, state, $$)) {
+         YYERROR;
+      }
+      if (!state->out_qualifier->push_to_global(& @1, state)) {
+         YYERROR;
+      }
+   }
    ;

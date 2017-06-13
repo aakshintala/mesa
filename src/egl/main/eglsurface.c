@@ -71,8 +71,8 @@ _eglParseSurfaceAttribList(_EGLSurface *surf, const EGLint *attrib_list)
    EGLint type = surf->Type;
    EGLint texture_type = EGL_PBUFFER_BIT;
    EGLint i, err = EGL_SUCCESS;
-   EGLint tex_target = -1;
-   EGLint tex_format = -1;
+   EGLint attr = EGL_NONE;
+   EGLint val = EGL_NONE;
 
    if (!attrib_list)
       return EGL_SUCCESS;
@@ -81,8 +81,8 @@ _eglParseSurfaceAttribList(_EGLSurface *surf, const EGLint *attrib_list)
       texture_type |= EGL_PIXMAP_BIT;
 
    for (i = 0; attrib_list[i] != EGL_NONE; i++) {
-      EGLint attr = attrib_list[i++];
-      EGLint val = attrib_list[i];
+      attr = attrib_list[i++];
+      val = attrib_list[i];
 
       switch (attr) {
       /* common attributes */
@@ -189,7 +189,6 @@ _eglParseSurfaceAttribList(_EGLSurface *surf, const EGLint *attrib_list)
             break;
          }
 
-         tex_format = val;
          switch (val) {
          case EGL_TEXTURE_RGB:
          case EGL_TEXTURE_RGBA:
@@ -209,7 +208,6 @@ _eglParseSurfaceAttribList(_EGLSurface *surf, const EGLint *attrib_list)
             break;
          }
 
-         tex_target = val;
          switch (val) {
          case EGL_TEXTURE_2D:
          case EGL_NO_TEXTURE:
@@ -235,24 +233,20 @@ _eglParseSurfaceAttribList(_EGLSurface *surf, const EGLint *attrib_list)
          break;
       }
 
-      if (type == EGL_PBUFFER_BIT) {
-         if (tex_target == -1)
-            tex_target = surf->TextureTarget;
-
-         if (tex_format == -1)
-            tex_format = surf->TextureFormat;
-
-         if ((tex_target == EGL_NO_TEXTURE && tex_format != EGL_NO_TEXTURE) ||
-             (tex_format == EGL_NO_TEXTURE && tex_target != EGL_NO_TEXTURE)) {
-            err = EGL_BAD_MATCH;
-         }
-      }
-
-      if (err != EGL_SUCCESS) {
-         _eglLog(_EGL_WARNING, "bad surface attribute 0x%04x", attr);
+      if (err != EGL_SUCCESS)
          break;
+   }
+
+   if (err == EGL_SUCCESS && type == EGL_PBUFFER_BIT) {
+      if ((surf->TextureTarget == EGL_NO_TEXTURE && surf->TextureFormat != EGL_NO_TEXTURE) ||
+          (surf->TextureFormat == EGL_NO_TEXTURE && surf->TextureTarget != EGL_NO_TEXTURE)) {
+         attr = surf->TextureTarget == EGL_NO_TEXTURE ? EGL_TEXTURE_TARGET : EGL_TEXTURE_FORMAT;
+         err = EGL_BAD_MATCH;
       }
    }
+
+   if (err != EGL_SUCCESS)
+      _eglLog(_EGL_WARNING, "bad surface attribute 0x%04x", attr);
 
    return err;
 }
@@ -268,8 +262,12 @@ _eglInitSurface(_EGLSurface *surf, _EGLDisplay *dpy, EGLint type,
 {
    const char *func;
    EGLint renderBuffer = EGL_BACK_BUFFER;
-   EGLint swapBehavior = EGL_BUFFER_PRESERVED;
+   EGLint swapBehavior = EGL_BUFFER_DESTROYED;
    EGLint err;
+
+   /* Swap behavior can be preserved only if config supports this. */
+   if (conf->SurfaceType & EGL_SWAP_BEHAVIOR_PRESERVED_BIT)
+      swapBehavior = EGL_BUFFER_PRESERVED;
 
    switch (type) {
    case EGL_WINDOW_BIT:
@@ -290,13 +288,14 @@ _eglInitSurface(_EGLSurface *surf, _EGLDisplay *dpy, EGLint type,
 
    if ((conf->SurfaceType & type) == 0) {
       /* The config can't be used to create a surface of this type */
-      _eglError(EGL_BAD_CONFIG, func);
+      _eglError(EGL_BAD_MATCH, func);
       return EGL_FALSE;
    }
 
    _eglInitResource(&surf->Resource, sizeof(*surf), dpy);
    surf->Type = type;
    surf->Config = conf;
+   surf->Lost = EGL_FALSE;
 
    surf->Width = 0;
    surf->Height = 0;
@@ -318,6 +317,8 @@ _eglInitSurface(_EGLSurface *surf, _EGLDisplay *dpy, EGLint type,
    surf->AspectRatio = EGL_UNKNOWN;
 
    surf->PostSubBufferSupportedNV = EGL_FALSE;
+   surf->SetDamageRegionCalled = EGL_FALSE;
+   surf->BufferAgeRead = EGL_FALSE;
 
    /* the default swap interval is 1 */
    _eglClampSwapInterval(surf, 1);
@@ -410,7 +411,18 @@ _eglQuerySurface(_EGLDriver *drv, _EGLDisplay *dpy, _EGLSurface *surface,
          _eglError(EGL_BAD_ATTRIBUTE, "eglQuerySurface");
          return EGL_FALSE;
       }
-      *value = drv->API.QueryBufferAge(drv, dpy, surface);
+      _EGLContext *ctx = _eglGetCurrentContext();
+      EGLint result = drv->API.QueryBufferAge(drv, dpy, surface);
+      /* error happened */
+      if (result < 0)
+         return EGL_FALSE;
+      if (_eglGetContextHandle(ctx) == EGL_NO_CONTEXT ||
+          ctx->DrawSurface != surface) {
+         _eglError(EGL_BAD_SURFACE, "eglQuerySurface");
+         return EGL_FALSE;
+      }
+      *value = result;
+      surface->BufferAgeRead = EGL_TRUE;
       break;
    default:
       _eglError(EGL_BAD_ATTRIBUTE, "eglQuerySurface");
@@ -527,14 +539,51 @@ _eglBindTexImage(_EGLDriver *drv, _EGLDisplay *dpy, _EGLSurface *surface,
 }
 
 EGLBoolean
-_eglReleaseTexImage(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf,
+_eglReleaseTexImage(_EGLDriver *drv, _EGLDisplay *dpy, _EGLSurface *surf,
                     EGLint buffer)
 {
-   /* TODO: do basic error checking and return success/fail.
+   /* Just do basic error checking and return success/fail.
     * Drivers must implement the real stuff.
     */
 
-  return EGL_TRUE;
+   EGLint texture_type = EGL_PBUFFER_BIT;
+
+   if (surf == EGL_NO_SURFACE)
+   {
+      _eglError(EGL_BAD_SURFACE, "eglReleaseTexImage");
+      return EGL_FALSE;
+   }
+
+   if (!surf->BoundToTexture)
+   {
+      /* Not an error, simply nothing to do */
+      return EGL_TRUE;
+   }
+
+   if (surf->TextureFormat == EGL_NO_TEXTURE)
+   {
+      _eglError(EGL_BAD_MATCH, "eglReleaseTexImage");
+      return EGL_FALSE;
+   }
+
+   if (buffer != EGL_BACK_BUFFER)
+   {
+      _eglError(EGL_BAD_PARAMETER, "eglReleaseTexImage");
+      return EGL_FALSE;
+   }
+
+   if (dpy->Extensions.NOK_texture_from_pixmap)
+      texture_type |= EGL_PIXMAP_BIT;
+
+   if (!(surf->Type & texture_type))
+   {
+      _eglError(EGL_BAD_SURFACE, "eglReleaseTexImage");
+      return EGL_FALSE;
+   }
+
+   surf->BoundToTexture = EGL_FALSE;
+
+   return EGL_TRUE;
 }
 
 

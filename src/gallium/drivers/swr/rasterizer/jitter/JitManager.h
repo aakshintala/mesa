@@ -29,9 +29,6 @@
 ******************************************************************************/
 #pragma once
 
-#include "common/os.h"
-#include "common/isa.hpp"
-
 #if defined(_WIN32)
 #pragma warning(disable : 4146 4244 4267 4800 4996)
 #endif
@@ -64,15 +61,9 @@
 
 #include "llvm/Analysis/Passes.h"
 
-#if HAVE_LLVM == 0x306
-#include "llvm/PassManager.h"
-using FunctionPassManager = llvm::FunctionPassManager;
-using PassManager = llvm::PassManager;
-#else
 #include "llvm/IR/LegacyPassManager.h"
 using FunctionPassManager = llvm::legacy::FunctionPassManager;
 using PassManager = llvm::legacy::PassManager;
-#endif
 
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
@@ -84,9 +75,11 @@ using PassManager = llvm::legacy::PassManager;
 #include "llvm/Support/DynamicLibrary.h"
 
 
+#include "common/os.h"
+#include "common/isa.hpp"
+
 #pragma pop_macro("DEBUG")
 
-using namespace llvm;
 //////////////////////////////////////////////////////////////////////////
 /// JitInstructionSet
 /// @brief Subclass of InstructionSet that allows users to override
@@ -136,7 +129,7 @@ private:
 
 
 
-struct JitLLVMContext : LLVMContext
+struct JitLLVMContext : llvm::LLVMContext
 {
 };
 
@@ -146,42 +139,40 @@ struct JitLLVMContext : LLVMContext
 //////////////////////////////////////////////////////////////////////////
 struct JitManager
 {
-    JitManager(uint32_t w, const char *arch);
+    JitManager(uint32_t w, const char* arch, const char* core);
     ~JitManager(){};
 
     JitLLVMContext          mContext;   ///< LLVM compiler
-    IRBuilder<>             mBuilder;   ///< LLVM IR Builder
-    ExecutionEngine*        mpExec;
+    llvm::IRBuilder<>       mBuilder;   ///< LLVM IR Builder
+    llvm::ExecutionEngine*  mpExec;
 
     // Need to be rebuilt after a JIT and before building new IR
-    Module* mpCurrentModule;
+    llvm::Module* mpCurrentModule;
     bool mIsModuleFinalized;
     uint32_t mJitNumber;
 
     uint32_t                 mVWidth;
 
     // Built in types.
-    Type*                mInt8Ty;
-    Type*                mInt32Ty;
-    Type*                mInt64Ty;
-    Type*                mFP32Ty;
-    StructType*          mV4FP32Ty;
-    StructType*          mV4Int32Ty;
+    llvm::Type*                mInt8Ty;
+    llvm::Type*                mInt32Ty;
+    llvm::Type*                mInt64Ty;
+    llvm::Type*                mFP32Ty;
 
-    Type* mSimtFP32Ty;
-    Type* mSimtInt32Ty;
+    llvm::Type* mSimtFP32Ty;
+    llvm::Type* mSimtInt32Ty;
 
-    Type* mSimdVectorInt32Ty;
-    Type* mSimdVectorTy;
+    llvm::Type* mSimdVectorInt32Ty;
+    llvm::Type* mSimdVectorTy;
 
     // fetch shader types
-    FunctionType*        mFetchShaderTy;
+    llvm::FunctionType*        mFetchShaderTy;
 
     JitInstructionSet mArch;
+    std::string mCore;
 
     void SetupNewModule();
-    bool SetupModuleFromIR(const uint8_t *pIR);
 
-    void DumpAsm(Function* pFunction, const char* fileName);
-    static void DumpToFile(Function *f, const char *fileName);
+    void DumpAsm(llvm::Function* pFunction, const char* fileName);
+    static void DumpToFile(llvm::Function *f, const char *fileName);
 };

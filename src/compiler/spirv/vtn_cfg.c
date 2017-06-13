@@ -183,7 +183,7 @@ vtn_add_case(struct vtn_builder *b, struct vtn_switch *swtch,
       list_inithead(&c->body);
       c->start_block = case_block;
       c->fallthrough = NULL;
-      nir_array_init(&c->values, b);
+      util_dynarray_init(&c->values, b);
       c->is_default = false;
       c->visited = false;
 
@@ -195,7 +195,7 @@ vtn_add_case(struct vtn_builder *b, struct vtn_switch *swtch,
    if (is_default) {
       case_block->switch_case->is_default = true;
    } else {
-      nir_array_add(&case_block->switch_case->values, uint32_t, val);
+      util_dynarray_append(&case_block->switch_case->values, uint32_t, val);
    }
 }
 
@@ -239,12 +239,12 @@ vtn_get_branch_type(struct vtn_block *block,
              swcase->fallthrough == block->switch_case);
       swcase->fallthrough = block->switch_case;
       return vtn_branch_type_switch_fallthrough;
-   } else if (block == switch_break) {
-      return vtn_branch_type_switch_break;
    } else if (block == loop_break) {
       return vtn_branch_type_loop_break;
    } else if (block == loop_cont) {
       return vtn_branch_type_loop_continue;
+   } else if (block == switch_break) {
+      return vtn_branch_type_switch_break;
    } else {
       return vtn_branch_type_none;
    }
@@ -443,6 +443,19 @@ vtn_cfg_walk_blocks(struct vtn_builder *b, struct list_head *cf_list,
             vtn_order_case(swtch, case_block->switch_case);
          }
 
+         enum vtn_branch_type branch_type =
+            vtn_get_branch_type(break_block, switch_case, NULL,
+                                loop_break, loop_cont);
+
+         if (branch_type != vtn_branch_type_none) {
+            /* It is possible that the break is actually the continue block
+             * for the containing loop.  In this case, we need to bail and let
+             * the loop parsing code handle the continue properly.
+             */
+            assert(branch_type == vtn_branch_type_loop_continue);
+            return;
+         }
+
          block = break_block;
          continue;
       }
@@ -514,11 +527,12 @@ vtn_handle_phi_second_pass(struct vtn_builder *b, SpvOp opcode,
    nir_variable *phi_var = phi_entry->data;
 
    for (unsigned i = 3; i < count; i += 2) {
-      struct vtn_ssa_value *src = vtn_ssa_value(b, w[i]);
       struct vtn_block *pred =
          vtn_value(b, w[i + 1], vtn_value_type_block)->block;
 
-      b->nb.cursor = nir_after_block_before_jump(pred->end_block);
+      b->nb.cursor = nir_after_instr(&pred->end_nop->instr);
+
+      struct vtn_ssa_value *src = vtn_ssa_value(b, w[i]);
 
       vtn_local_store(b, src, nir_deref_var_create(b, phi_var));
    }
@@ -576,7 +590,9 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
 
          vtn_foreach_instruction(b, block_start, block_end, handler);
 
-         block->end_block = nir_cursor_current_block(b->nb.cursor);
+         block->end_nop = nir_intrinsic_instr_create(b->nb.shader,
+                                                     nir_intrinsic_nop);
+         nir_builder_instr_insert(&b->nb, &block->end_nop->instr);
 
          if ((*block->branch & SpvOpCodeMask) == SpvOpReturnValue) {
             struct vtn_ssa_value *src = vtn_ssa_value(b, block->branch[1]);
@@ -594,15 +610,10 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
 
       case vtn_cf_node_type_if: {
          struct vtn_if *vtn_if = (struct vtn_if *)node;
-
-         nir_if *if_stmt = nir_if_create(b->shader);
-         if_stmt->condition =
-            nir_src_for_ssa(vtn_ssa_value(b, vtn_if->condition)->def);
-         nir_cf_node_insert(b->nb.cursor, &if_stmt->cf_node);
-
          bool sw_break = false;
 
-         b->nb.cursor = nir_after_cf_list(&if_stmt->then_list);
+         nir_if *nif =
+            nir_push_if(&b->nb, vtn_ssa_value(b, vtn_if->condition)->def);
          if (vtn_if->then_type == vtn_branch_type_none) {
             vtn_emit_cf_list(b, &vtn_if->then_body,
                              switch_fall_var, &sw_break, handler);
@@ -610,7 +621,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             vtn_emit_branch(b, vtn_if->then_type, switch_fall_var, &sw_break);
          }
 
-         b->nb.cursor = nir_after_cf_list(&if_stmt->else_list);
+         nir_push_else(&b->nb, nif);
          if (vtn_if->else_type == vtn_branch_type_none) {
             vtn_emit_cf_list(b, &vtn_if->else_body,
                              switch_fall_var, &sw_break, handler);
@@ -618,7 +629,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             vtn_emit_branch(b, vtn_if->else_type, switch_fall_var, &sw_break);
          }
 
-         b->nb.cursor = nir_after_cf_node(&if_stmt->cf_node);
+         nir_pop_if(&b->nb, nif);
 
          /* If we encountered a switch break somewhere inside of the if,
           * then it would have been handled correctly by calling
@@ -628,13 +639,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
           */
          if (sw_break) {
             *has_switch_break = true;
-
-            nir_if *switch_if = nir_if_create(b->shader);
-            switch_if->condition =
-               nir_src_for_ssa(nir_load_var(&b->nb, switch_fall_var));
-            nir_cf_node_insert(b->nb.cursor, &switch_if->cf_node);
-
-            b->nb.cursor = nir_after_cf_list(&if_stmt->then_list);
+            nir_push_if(&b->nb, nir_load_var(&b->nb, switch_fall_var));
          }
          break;
       }
@@ -642,10 +647,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
       case vtn_cf_node_type_loop: {
          struct vtn_loop *vtn_loop = (struct vtn_loop *)node;
 
-         nir_loop *loop = nir_loop_create(b->shader);
-         nir_cf_node_insert(b->nb.cursor, &loop->cf_node);
-
-         b->nb.cursor = nir_after_cf_list(&loop->body);
+         nir_loop *loop = nir_push_loop(&b->nb);
          vtn_emit_cf_list(b, &vtn_loop->body, NULL, NULL, handler);
 
          if (!list_empty(&vtn_loop->cont_body)) {
@@ -660,20 +662,20 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             nir_store_var(&b->nb, do_cont, nir_imm_int(&b->nb, NIR_FALSE), 1);
 
             b->nb.cursor = nir_before_cf_list(&loop->body);
-            nir_if *cont_if = nir_if_create(b->shader);
-            cont_if->condition = nir_src_for_ssa(nir_load_var(&b->nb, do_cont));
-            nir_cf_node_insert(b->nb.cursor, &cont_if->cf_node);
 
-            b->nb.cursor = nir_after_cf_list(&cont_if->then_list);
+            nir_if *cont_if =
+               nir_push_if(&b->nb, nir_load_var(&b->nb, do_cont));
+
             vtn_emit_cf_list(b, &vtn_loop->cont_body, NULL, NULL, handler);
 
-            b->nb.cursor = nir_after_cf_node(&cont_if->cf_node);
+            nir_pop_if(&b->nb, cont_if);
+
             nir_store_var(&b->nb, do_cont, nir_imm_int(&b->nb, NIR_TRUE), 1);
 
             b->has_loop_continue = true;
          }
 
-         b->nb.cursor = nir_after_cf_node(&loop->cf_node);
+         nir_pop_loop(&b->nb, loop);
          break;
       }
 
@@ -707,7 +709,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             }
 
             nir_ssa_def *cond = NULL;
-            nir_array_foreach(&cse->values, uint32_t, val) {
+            util_dynarray_foreach(&cse->values, uint32_t, val) {
                nir_ssa_def *is_val =
                   nir_ieq(&b->nb, sel, nir_imm_int(&b->nb, *val));
 
@@ -731,17 +733,14 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             /* Take fallthrough into account */
             cond = nir_ior(&b->nb, cond, nir_load_var(&b->nb, fall_var));
 
-            nir_if *case_if = nir_if_create(b->nb.shader);
-            case_if->condition = nir_src_for_ssa(cond);
-            nir_cf_node_insert(b->nb.cursor, &case_if->cf_node);
+            nir_if *case_if = nir_push_if(&b->nb, cond);
 
             bool has_break = false;
-            b->nb.cursor = nir_after_cf_list(&case_if->then_list);
             nir_store_var(&b->nb, fall_var, nir_imm_int(&b->nb, NIR_TRUE), 1);
             vtn_emit_cf_list(b, &cse->body, fall_var, &has_break, handler);
             (void)has_break; /* We don't care */
 
-            b->nb.cursor = nir_after_cf_node(&case_if->cf_node);
+            nir_pop_if(&b->nb, case_if);
          }
          assert(i == num_cases);
 

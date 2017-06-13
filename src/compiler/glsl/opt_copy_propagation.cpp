@@ -37,36 +37,10 @@
 #include "ir_basic_block.h"
 #include "ir_optimization.h"
 #include "compiler/glsl_types.h"
+#include "util/hash_table.h"
+#include "util/set.h"
 
 namespace {
-
-class acp_entry : public exec_node
-{
-public:
-   acp_entry(ir_variable *lhs, ir_variable *rhs)
-   {
-      assert(lhs);
-      assert(rhs);
-      this->lhs = lhs;
-      this->rhs = rhs;
-   }
-
-   ir_variable *lhs;
-   ir_variable *rhs;
-};
-
-
-class kill_entry : public exec_node
-{
-public:
-   kill_entry(ir_variable *var)
-   {
-      assert(var);
-      this->var = var;
-   }
-
-   ir_variable *var;
-};
 
 class ir_copy_propagation_visitor : public ir_hierarchical_visitor {
 public:
@@ -74,8 +48,12 @@ public:
    {
       progress = false;
       mem_ctx = ralloc_context(0);
-      this->acp = new(mem_ctx) exec_list;
-      this->kills = new(mem_ctx) exec_list;
+      lin_ctx = linear_alloc_parent(mem_ctx, 0);
+      acp = _mesa_hash_table_create(mem_ctx, _mesa_hash_pointer,
+                                    _mesa_key_pointer_equal);
+      kills = _mesa_set_create(mem_ctx, _mesa_hash_pointer,
+                               _mesa_key_pointer_equal);
+      killed_all = false;
    }
    ~ir_copy_propagation_visitor()
    {
@@ -95,19 +73,20 @@ public:
    void kill(ir_variable *ir);
    void handle_if_block(exec_list *instructions);
 
-   /** List of acp_entry: The available copies to propagate */
-   exec_list *acp;
+   /** Hash of lhs->rhs: The available copies to propagate */
+   hash_table *acp;
+
    /**
-    * List of kill_entry: The variables whose values were killed in this
-    * block.
+    * Set of ir_variables: Whose values were killed in this block.
     */
-   exec_list *kills;
+   set *kills;
 
    bool progress;
 
    bool killed_all;
 
    void *mem_ctx;
+   void *lin_ctx;
 };
 
 } /* unnamed namespace */
@@ -119,18 +98,20 @@ ir_copy_propagation_visitor::visit_enter(ir_function_signature *ir)
     * block.  Any instructions at global scope will be shuffled into
     * main() at link time, so they're irrelevant to us.
     */
-   exec_list *orig_acp = this->acp;
-   exec_list *orig_kills = this->kills;
+   hash_table *orig_acp = this->acp;
+   set *orig_kills = this->kills;
    bool orig_killed_all = this->killed_all;
 
-   this->acp = new(mem_ctx) exec_list;
-   this->kills = new(mem_ctx) exec_list;
+   acp = _mesa_hash_table_create(NULL, _mesa_hash_pointer,
+                                 _mesa_key_pointer_equal);
+   kills = _mesa_set_create(NULL, _mesa_hash_pointer,
+                            _mesa_key_pointer_equal);
    this->killed_all = false;
 
    visit_list_elements(this, &ir->body);
 
-   ralloc_free(this->acp);
-   ralloc_free(this->kills);
+   _mesa_hash_table_destroy(acp, NULL);
+   _mesa_set_destroy(kills, NULL);
 
    this->kills = orig_kills;
    this->acp = orig_acp;
@@ -169,14 +150,10 @@ ir_copy_propagation_visitor::visit(ir_dereference_variable *ir)
    if (this->in_assignee)
       return visit_continue;
 
-   ir_variable *var = ir->var;
-
-   foreach_in_list(acp_entry, entry, this->acp) {
-      if (var == entry->lhs) {
-	 ir->var = entry->rhs;
-	 this->progress = true;
-	 break;
-      }
+   struct hash_entry *entry = _mesa_hash_table_search(acp, ir->var);
+   if (entry) {
+      ir->var = (ir_variable *) entry->data;
+      progress = true;
    }
 
    return visit_continue;
@@ -197,11 +174,34 @@ ir_copy_propagation_visitor::visit_enter(ir_call *ir)
       }
    }
 
-   /* Since we're unlinked, we don't (necessarily) know the side effects of
-    * this call.  So kill all copies.
+   /* Since this pass can run when unlinked, we don't (necessarily) know
+    * the side effects of calls.  (When linked, most calls are inlined
+    * anyway, so it doesn't matter much.)
+    *
+    * One place where this does matter is IR intrinsics.  They're never
+    * inlined.  We also know what they do - while some have side effects
+    * (such as image writes), none edit random global variables.  So we
+    * can assume they're side-effect free (other than the return value
+    * and out parameters).
     */
-   acp->make_empty();
-   this->killed_all = true;
+   if (!ir->callee->is_intrinsic()) {
+      _mesa_hash_table_clear(acp, NULL);
+      this->killed_all = true;
+   } else {
+      if (ir->return_deref)
+         kill(ir->return_deref->var);
+
+      foreach_two_lists(formal_node, &ir->callee->parameters,
+                        actual_node, &ir->actual_parameters) {
+         ir_variable *sig_param = (ir_variable *) formal_node;
+         if (sig_param->data.mode == ir_var_function_out ||
+             sig_param->data.mode == ir_var_function_inout) {
+            ir_rvalue *ir = (ir_rvalue *) actual_node;
+            ir_variable *var = ir->variable_referenced();
+            kill(var);
+         }
+      }
+   }
 
    return visit_continue_with_parent;
 }
@@ -209,36 +209,40 @@ ir_copy_propagation_visitor::visit_enter(ir_call *ir)
 void
 ir_copy_propagation_visitor::handle_if_block(exec_list *instructions)
 {
-   exec_list *orig_acp = this->acp;
-   exec_list *orig_kills = this->kills;
+   hash_table *orig_acp = this->acp;
+   set *orig_kills = this->kills;
    bool orig_killed_all = this->killed_all;
 
-   this->acp = new(mem_ctx) exec_list;
-   this->kills = new(mem_ctx) exec_list;
+   acp = _mesa_hash_table_create(NULL, _mesa_hash_pointer,
+                                 _mesa_key_pointer_equal);
+   kills = _mesa_set_create(NULL, _mesa_hash_pointer,
+                            _mesa_key_pointer_equal);
    this->killed_all = false;
 
    /* Populate the initial acp with a copy of the original */
-   foreach_in_list(acp_entry, a, orig_acp) {
-      this->acp->push_tail(new(this->acp) acp_entry(a->lhs, a->rhs));
+   struct hash_entry *entry;
+   hash_table_foreach(orig_acp, entry) {
+      _mesa_hash_table_insert(acp, entry->key, entry->data);
    }
 
    visit_list_elements(this, instructions);
 
    if (this->killed_all) {
-      orig_acp->make_empty();
+      _mesa_hash_table_clear(orig_acp, NULL);
    }
 
-   exec_list *new_kills = this->kills;
+   set *new_kills = this->kills;
    this->kills = orig_kills;
-   ralloc_free(this->acp);
+   _mesa_hash_table_destroy(acp, NULL);
    this->acp = orig_acp;
    this->killed_all = this->killed_all || orig_killed_all;
 
-   foreach_in_list(kill_entry, k, new_kills) {
-      kill(k->var);
+   struct set_entry *s_entry;
+   set_foreach(new_kills, s_entry) {
+      kill((ir_variable *) s_entry->key);
    }
 
-   ralloc_free(new_kills);
+   _mesa_set_destroy(new_kills, NULL);
 }
 
 ir_visitor_status
@@ -256,38 +260,41 @@ ir_copy_propagation_visitor::visit_enter(ir_if *ir)
 void
 ir_copy_propagation_visitor::handle_loop(ir_loop *ir, bool keep_acp)
 {
-   exec_list *orig_acp = this->acp;
-   exec_list *orig_kills = this->kills;
+   hash_table *orig_acp = this->acp;
+   set *orig_kills = this->kills;
    bool orig_killed_all = this->killed_all;
 
-   this->acp = new(mem_ctx) exec_list;
-   this->kills = new(mem_ctx) exec_list;
+   acp = _mesa_hash_table_create(NULL, _mesa_hash_pointer,
+                                 _mesa_key_pointer_equal);
+   kills = _mesa_set_create(NULL, _mesa_hash_pointer,
+                            _mesa_key_pointer_equal);
    this->killed_all = false;
 
    if (keep_acp) {
-      /* Populate the initial acp with a copy of the original */
-      foreach_in_list(acp_entry, a, orig_acp) {
-         this->acp->push_tail(new(this->acp) acp_entry(a->lhs, a->rhs));
+      struct hash_entry *entry;
+      hash_table_foreach(orig_acp, entry) {
+         _mesa_hash_table_insert(acp, entry->key, entry->data);
       }
    }
 
    visit_list_elements(this, &ir->body_instructions);
 
    if (this->killed_all) {
-      orig_acp->make_empty();
+      _mesa_hash_table_clear(orig_acp, NULL);
    }
 
-   exec_list *new_kills = this->kills;
+   set *new_kills = this->kills;
    this->kills = orig_kills;
-   ralloc_free(this->acp);
+   _mesa_hash_table_destroy(acp, NULL);
    this->acp = orig_acp;
    this->killed_all = this->killed_all || orig_killed_all;
 
-   foreach_in_list(kill_entry, k, new_kills) {
-      kill(k->var);
+   struct set_entry *entry;
+   set_foreach(new_kills, entry) {
+      kill((ir_variable *) entry->key);
    }
 
-   ralloc_free(new_kills);
+   _mesa_set_destroy(new_kills, NULL);
 }
 
 ir_visitor_status
@@ -313,15 +320,19 @@ ir_copy_propagation_visitor::kill(ir_variable *var)
    assert(var != NULL);
 
    /* Remove any entries currently in the ACP for this kill. */
-   foreach_in_list_safe(acp_entry, entry, acp) {
-      if (entry->lhs == var || entry->rhs == var) {
-	 entry->remove();
+   struct hash_entry *entry = _mesa_hash_table_search(acp, var);
+   if (entry) {
+      _mesa_hash_table_remove(acp, entry);
+   }
+
+   hash_table_foreach(acp, entry) {
+      if (var == (ir_variable *) entry->data) {
+         _mesa_hash_table_remove(acp, entry);
       }
    }
 
-   /* Add the LHS variable to the list of killed variables in this block.
-    */
-   this->kills->push_tail(new(this->kills) kill_entry(var));
+   /* Add the LHS variable to the set of killed variables in this block. */
+   _mesa_set_add(kills, var);
 }
 
 /**
@@ -331,8 +342,6 @@ ir_copy_propagation_visitor::kill(ir_variable *var)
 void
 ir_copy_propagation_visitor::add_copy(ir_assignment *ir)
 {
-   acp_entry *entry;
-
    if (ir->condition)
       return;
 
@@ -351,8 +360,9 @@ ir_copy_propagation_visitor::add_copy(ir_assignment *ir)
       } else if (lhs_var->data.mode != ir_var_shader_storage &&
                  lhs_var->data.mode != ir_var_shader_shared &&
                  lhs_var->data.precise == rhs_var->data.precise) {
-	 entry = new(this->acp) acp_entry(lhs_var, rhs_var);
-	 this->acp->push_tail(entry);
+         assert(lhs_var);
+         assert(rhs_var);
+         _mesa_hash_table_insert(acp, lhs_var, rhs_var);
       }
    }
 }

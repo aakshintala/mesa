@@ -153,7 +153,7 @@ softpipe_flush_resource(struct pipe_context *pipe,
              * This is for illustrative purposes only, as softpipe does not
              * have fences.
              */
-            pipe->screen->fence_finish(pipe->screen, fence,
+            pipe->screen->fence_finish(pipe->screen, NULL, fence,
                                        PIPE_TIMEOUT_INFINITE);
             pipe->screen->fence_reference(pipe->screen, &fence, NULL);
          }
@@ -169,7 +169,7 @@ softpipe_flush_resource(struct pipe_context *pipe,
    return TRUE;
 }
 
-void softpipe_texture_barrier(struct pipe_context *pipe)
+void softpipe_texture_barrier(struct pipe_context *pipe, unsigned flags)
 {
    struct softpipe_context *softpipe = softpipe_context(pipe);
    uint i, sh;
@@ -192,5 +192,5 @@ void softpipe_texture_barrier(struct pipe_context *pipe)
 
 void softpipe_memory_barrier(struct pipe_context *pipe, unsigned flags)
 {
-   softpipe_texture_barrier(pipe);
+   softpipe_texture_barrier(pipe, 0);
 }

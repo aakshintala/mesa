@@ -186,8 +186,8 @@ blend_per_rt(const struct gl_context *ctx)
    return GL_FALSE;
 }
 
-static void 
-update_blend( struct st_context *st )
+void
+st_update_blend( struct st_context *st )
 {
    struct pipe_blend_state *blend = &st->state.blend;
    const struct gl_context *ctx = st->ctx;
@@ -205,7 +205,7 @@ update_blend( struct st_context *st )
       blend->logicop_enable = 1;
       blend->logicop_func = translate_logicop(ctx->Color.LogicOp);
    }
-   else if (ctx->Color.BlendEnabled) {
+   else if (ctx->Color.BlendEnabled && !ctx->Color._AdvancedBlendMode) {
       /* blending enabled */
       for (i = 0, j = 0; i < num_state; i++) {
 
@@ -265,9 +265,12 @@ update_blend( struct st_context *st )
 
    blend->dither = ctx->Color.DitherFlag;
 
-   if (ctx->Multisample.Enabled) {
-      /* unlike in gallium/d3d10 these operations are only performed
-         if msaa is enabled */
+   if (ctx->Multisample.Enabled &&
+       ctx->DrawBuffer->Visual.sampleBuffers > 0 &&
+       !(ctx->DrawBuffer->_IntegerBuffers & 0x1)) {
+      /* Unlike in gallium/d3d10 these operations are only performed
+       * if both msaa is enabled and we have a multisample buffer.
+       */
       blend->alpha_to_coverage = ctx->Multisample.SampleAlphaToCoverage;
       blend->alpha_to_one = ctx->Multisample.SampleAlphaToOne;
    }
@@ -280,13 +283,3 @@ update_blend( struct st_context *st )
       cso_set_blend_color(st->cso_context, &bc);
    }
 }
-
-
-const struct st_tracked_state st_update_blend = {
-   "st_update_blend",					/* name */
-   {							/* dirty */
-      (_NEW_COLOR | _NEW_MULTISAMPLE),  /* XXX _NEW_BLEND someday? */	/* mesa */
-      0,						/* st */
-   },
-   update_blend,					/* update */
-};

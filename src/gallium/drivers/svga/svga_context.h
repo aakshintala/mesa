@@ -31,6 +31,8 @@
 #include "pipe/p_defines.h"
 #include "pipe/p_state.h"
 
+#include "os/os_time.h"
+
 #include "util/u_blitter.h"
 #include "util/list.h"
 
@@ -44,32 +46,36 @@
 
 
 /** Non-GPU queries for gallium HUD */
+enum svga_hud {
 /* per-frame counters */
-#define SVGA_QUERY_NUM_DRAW_CALLS          (PIPE_QUERY_DRIVER_SPECIFIC + 0)
-#define SVGA_QUERY_NUM_FALLBACKS           (PIPE_QUERY_DRIVER_SPECIFIC + 1)
-#define SVGA_QUERY_NUM_FLUSHES             (PIPE_QUERY_DRIVER_SPECIFIC + 2)
-#define SVGA_QUERY_NUM_VALIDATIONS         (PIPE_QUERY_DRIVER_SPECIFIC + 3)
-#define SVGA_QUERY_MAP_BUFFER_TIME         (PIPE_QUERY_DRIVER_SPECIFIC + 4)
-#define SVGA_QUERY_NUM_RESOURCES_MAPPED    (PIPE_QUERY_DRIVER_SPECIFIC + 5)
-#define SVGA_QUERY_NUM_BYTES_UPLOADED      (PIPE_QUERY_DRIVER_SPECIFIC + 6)
-#define SVGA_QUERY_COMMAND_BUFFER_SIZE     (PIPE_QUERY_DRIVER_SPECIFIC + 7)
-#define SVGA_QUERY_FLUSH_TIME              (PIPE_QUERY_DRIVER_SPECIFIC + 8)
-#define SVGA_QUERY_SURFACE_WRITE_FLUSHES   (PIPE_QUERY_DRIVER_SPECIFIC + 9)
-#define SVGA_QUERY_NUM_READBACKS           (PIPE_QUERY_DRIVER_SPECIFIC + 10)
-#define SVGA_QUERY_NUM_RESOURCE_UPDATES    (PIPE_QUERY_DRIVER_SPECIFIC + 11)
-#define SVGA_QUERY_NUM_BUFFER_UPLOADS      (PIPE_QUERY_DRIVER_SPECIFIC + 12)
-#define SVGA_QUERY_NUM_CONST_BUF_UPDATES   (PIPE_QUERY_DRIVER_SPECIFIC + 13)
-#define SVGA_QUERY_NUM_CONST_UPDATES       (PIPE_QUERY_DRIVER_SPECIFIC + 14)
+   SVGA_QUERY_NUM_DRAW_CALLS = PIPE_QUERY_DRIVER_SPECIFIC,
+   SVGA_QUERY_NUM_FALLBACKS,
+   SVGA_QUERY_NUM_FLUSHES,
+   SVGA_QUERY_NUM_VALIDATIONS,
+   SVGA_QUERY_MAP_BUFFER_TIME,
+   SVGA_QUERY_NUM_BUFFERS_MAPPED,
+   SVGA_QUERY_NUM_TEXTURES_MAPPED,
+   SVGA_QUERY_NUM_BYTES_UPLOADED,
+   SVGA_QUERY_COMMAND_BUFFER_SIZE,
+   SVGA_QUERY_FLUSH_TIME,
+   SVGA_QUERY_SURFACE_WRITE_FLUSHES,
+   SVGA_QUERY_NUM_READBACKS,
+   SVGA_QUERY_NUM_RESOURCE_UPDATES,
+   SVGA_QUERY_NUM_BUFFER_UPLOADS,
+   SVGA_QUERY_NUM_CONST_BUF_UPDATES,
+   SVGA_QUERY_NUM_CONST_UPDATES,
 
 /* running total counters */
-#define SVGA_QUERY_MEMORY_USED             (PIPE_QUERY_DRIVER_SPECIFIC + 15)
-#define SVGA_QUERY_NUM_SHADERS             (PIPE_QUERY_DRIVER_SPECIFIC + 16)
-#define SVGA_QUERY_NUM_RESOURCES           (PIPE_QUERY_DRIVER_SPECIFIC + 17)
-#define SVGA_QUERY_NUM_STATE_OBJECTS       (PIPE_QUERY_DRIVER_SPECIFIC + 18)
-#define SVGA_QUERY_NUM_SURFACE_VIEWS       (PIPE_QUERY_DRIVER_SPECIFIC + 19)
-#define SVGA_QUERY_NUM_GENERATE_MIPMAP     (PIPE_QUERY_DRIVER_SPECIFIC + 20)
+   SVGA_QUERY_MEMORY_USED,
+   SVGA_QUERY_NUM_SHADERS,
+   SVGA_QUERY_NUM_RESOURCES,
+   SVGA_QUERY_NUM_STATE_OBJECTS,
+   SVGA_QUERY_NUM_SURFACE_VIEWS,
+   SVGA_QUERY_NUM_GENERATE_MIPMAP,
+
 /*SVGA_QUERY_MAX has to be last because it is size of an array*/
-#define SVGA_QUERY_MAX                     (PIPE_QUERY_DRIVER_SPECIFIC + 21)
+   SVGA_QUERY_MAX
+};
 
 /**
  * Maximum supported number of constant buffers per shader
@@ -109,7 +115,7 @@ struct svga_blend_state {
       uint8_t srcblend;
       uint8_t dstblend;
       uint8_t blendeq;
-      
+
       boolean separate_alpha_blend_enable;
       uint8_t srcblend_alpha;
       uint8_t dstblend_alpha;
@@ -126,7 +132,7 @@ struct svga_depth_stencil_state {
 
    unsigned alphatestenable:1;
    unsigned alphafunc:8;
-  
+
    struct {
       unsigned enabled:1;
       unsigned func:8;
@@ -134,7 +140,7 @@ struct svga_depth_stencil_state {
       unsigned zfail:8;
       unsigned pass:8;
    } stencil[2];
-   
+
    /* SVGA3D has one ref/mask/writemask triple shared between front &
     * back face stencil.  We really need two:
     */
@@ -171,7 +177,7 @@ struct svga_rasterizer_state {
    float depthbias;
    float pointsize;
    float linewidth;
-   
+
    unsigned hw_fillmode:2;         /* PIPE_POLYGON_MODE_x */
 
    /** Which prims do we need help for?  Bitmask of (1 << PIPE_PRIM_x) flags */
@@ -243,10 +249,11 @@ struct svga_velems_state {
    SVGA3dElementLayoutId id; /**< VGPU10 */
 };
 
+
 /* Use to calculate differences between state emitted to hardware and
- * current driver-calculated state.  
+ * current driver-calculated state.
  */
-struct svga_state 
+struct svga_state
 {
    const struct svga_blend_state *blend;
    const struct svga_depth_stencil_state *depth;
@@ -261,7 +268,6 @@ struct svga_state
    struct svga_geometry_shader *gs;      /* derived GS */
 
    struct pipe_vertex_buffer vb[PIPE_MAX_ATTRIBS];
-   struct pipe_index_buffer ib;
    /** Constant buffers for each shader.
     * The size should probably always match with that of
     * svga_shader_emitter_v10.num_shader_consts.
@@ -286,7 +292,7 @@ struct svga_state
    unsigned num_samplers[PIPE_SHADER_TYPES];
    unsigned num_sampler_views[PIPE_SHADER_TYPES];
    unsigned num_vertex_buffers;
-   unsigned reduced_prim;
+   enum pipe_prim_type reduced_prim;
 
    struct {
       unsigned flag_1d;
@@ -314,9 +320,14 @@ struct svga_hw_clear_state
    struct {
       float zmin, zmax;
    } depthrange;
-   
+
    struct pipe_framebuffer_state framebuffer;
    struct svga_prescale prescale;
+
+   /* VGPU10 state */
+   unsigned num_rendertargets;
+   struct pipe_surface *rtv[SVGA3D_MAX_RENDER_TARGETS];
+   struct pipe_surface *dsv;
 };
 
 struct svga_hw_view_state
@@ -332,21 +343,35 @@ struct svga_hw_view_state
  */
 struct svga_hw_draw_state
 {
+   /** VGPU9 rasterization state */
    unsigned rs[SVGA3D_RS_MAX];
+   /** VGPU9 texture sampler and bindings state */
    unsigned ts[SVGA3D_PIXEL_SAMPLERREG_MAX][SVGA3D_TS_MAX];
+   /** VGPU9 texture views */
+   unsigned num_views;
+   struct svga_hw_view_state views[PIPE_MAX_SAMPLERS];
+   /** VGPU9 constant buffer values */
    float cb[PIPE_SHADER_TYPES][SVGA3D_CONSTREG_MAX][4];
 
+   /** Currently bound shaders */
    struct svga_shader_variant *fs;
    struct svga_shader_variant *vs;
    struct svga_shader_variant *gs;
-   struct svga_hw_view_state views[PIPE_MAX_SAMPLERS];
-   unsigned num_views;
+
+   /** Currently bound constant buffer, per shader stage */
    struct pipe_resource *constbuf[PIPE_SHADER_TYPES];
 
-   /* Bitmask of enabled constant bufffers */
+   /** Bitmask of enabled constant buffers */
    unsigned enabled_constbufs[PIPE_SHADER_TYPES];
 
-   /* VGPU10 HW state (used to prevent emitting redundant state) */
+   /**
+    * These are used to reduce the number of times we call u_upload_unmap()
+    * while updating the zero-th/default VGPU10 constant buffer.
+    */
+   struct pipe_resource *const0_buffer;
+   struct svga_winsys_surface *const0_handle;
+
+   /** VGPU10 HW state (used to prevent emitting redundant state) */
    SVGA3dDepthStencilStateId depth_stencil_id;
    unsigned stencil_ref;
    SVGA3dBlendStateId blend_id;
@@ -368,9 +393,15 @@ struct svga_hw_draw_state
    unsigned num_samplers[PIPE_SHADER_TYPES];
    SVGA3dSamplerId samplers[PIPE_SHADER_TYPES][PIPE_MAX_SAMPLERS];
 
-   /* used for rebinding */
    unsigned num_sampler_views[PIPE_SHADER_TYPES];
+   struct pipe_sampler_view
+      *sampler_views[PIPE_SHADER_TYPES][PIPE_MAX_SAMPLERS];
+
+   /* used for rebinding */
    unsigned default_constbuf_size[PIPE_SHADER_TYPES];
+
+   boolean rasterizer_discard; /* set if rasterization is disabled */
+   boolean has_backed_views;   /* set if any of the rtv/dsv is a backed surface view */
 };
 
 
@@ -404,6 +435,7 @@ struct svga_context
    struct svga_winsys_context *swc;
    struct blitter_context *blitter;
    struct u_upload_mgr *const0_upload;
+   struct u_upload_mgr *tex_upload;
 
    struct {
       boolean no_swtnl;
@@ -412,8 +444,6 @@ struct svga_context
 
       /* incremented for each shader */
       unsigned shader_id;
-
-      unsigned disable_shader;
 
       boolean no_line_width;
       boolean force_hw_line_stipple;
@@ -468,8 +498,6 @@ struct svga_context
 
       unsigned texture_timestamp;
 
-      /* 
-       */
       struct svga_sw_state          sw;
       struct svga_hw_draw_state     hw_draw;
       struct svga_hw_clear_state    hw_clear;
@@ -511,7 +539,8 @@ struct svga_context
       uint64_t num_flushes;             /**< SVGA_QUERY_NUM_FLUSHES */
       uint64_t num_validations;         /**< SVGA_QUERY_NUM_VALIDATIONS */
       uint64_t map_buffer_time;         /**< SVGA_QUERY_MAP_BUFFER_TIME */
-      uint64_t num_resources_mapped;    /**< SVGA_QUERY_NUM_RESOURCES_MAPPED */
+      uint64_t num_buffers_mapped;      /**< SVGA_QUERY_NUM_BUFFERS_MAPPED */
+      uint64_t num_textures_mapped;     /**< SVGA_QUERY_NUM_TEXTURES_MAPPED */
       uint64_t command_buffer_size;     /**< SVGA_QUERY_COMMAND_BUFFER_SIZE */
       uint64_t flush_time;              /**< SVGA_QUERY_FLUSH_TIME */
       uint64_t surface_write_flushes;   /**< SVGA_QUERY_SURFACE_WRITE_FLUSHES */
@@ -533,6 +562,8 @@ struct svga_context
       uint64_t num_surface_views;       /**< SVGA_QUERY_NUM_SURFACE_VIEWS */
       uint64_t num_bytes_uploaded;      /**< SVGA_QUERY_NUM_BYTES_UPLOADED */
       uint64_t num_generate_mipmap;     /**< SVGA_QUERY_NUM_GENERATE_MIPMAP */
+
+      boolean uses_time;                /**< os_time_get() calls needed? */
    } hud;
 
    /** The currently bound stream output targets */
@@ -554,6 +585,18 @@ struct svga_context
 
    /** Alternate rasterizer states created for point sprite */
    struct svga_rasterizer_state *rasterizer_no_cull[2];
+
+   /** Depth stencil state created to disable depth stencil test */
+   struct svga_depth_stencil_state *depthstencil_disable;
+
+   /** Current conditional rendering predicate */
+   struct {
+      SVGA3dQueryId query_id;
+      boolean cond;
+   } pred;
+
+   boolean render_condition;
+   boolean disable_rasterizer; /* Set if to disable rasterization */
 };
 
 /* A flag for each state_tracker state object:
@@ -591,26 +634,6 @@ struct svga_context
 #define SVGA_NEW_TEXTURE_CONSTS      0x80000000
 
 
-
-
-/***********************************************************************
- * svga_clear.c: 
- */
-void svga_clear(struct pipe_context *pipe, 
-                unsigned buffers,
-                const union pipe_color_union *color,
-                double depth,
-                unsigned stencil);
-
-
-/***********************************************************************
- * svga_screen_texture.c: 
- */
-void svga_mark_surfaces_dirty(struct svga_context *svga);
-
-
-
-
 void svga_init_state_functions( struct svga_context *svga );
 void svga_init_flush_functions( struct svga_context *svga );
 void svga_init_string_functions( struct svga_context *svga );
@@ -630,8 +653,10 @@ void svga_init_draw_functions( struct svga_context *svga );
 void svga_init_query_functions( struct svga_context *svga );
 void svga_init_surface_functions(struct svga_context *svga);
 void svga_init_stream_output_functions( struct svga_context *svga );
+void svga_init_clear_functions( struct svga_context *svga );
 
 void svga_cleanup_vertex_state( struct svga_context *svga );
+void svga_cleanup_sampler_state( struct svga_context *svga );
 void svga_cleanup_tss_binding( struct svga_context *svga );
 void svga_cleanup_framebuffer( struct svga_context *svga );
 
@@ -648,7 +673,7 @@ void svga_surfaces_flush(struct svga_context *svga);
 
 struct pipe_context *
 svga_context_create(struct pipe_screen *screen,
-		    void *priv, unsigned flags);
+                    void *priv, unsigned flags);
 
 
 /***********************************************************************
@@ -661,6 +686,11 @@ svga_context( struct pipe_context *pipe )
    return (struct svga_context *)pipe;
 }
 
+static inline struct svga_winsys_screen *
+svga_sws(struct svga_context *svga)
+{
+   return svga_screen(svga->pipe.screen)->sws;
+}
 
 static inline boolean
 svga_have_gb_objects(const struct svga_context *svga)
@@ -691,5 +721,16 @@ svga_rects_equal(const SVGA3dRect *r1, const SVGA3dRect *r2)
 {
    return memcmp(r1, r2, sizeof(*r1)) == 0;
 }
+
+/**
+ * If the Gallium HUD is enabled, this will return the current time.
+ * Otherwise, just return zero.
+ */
+static inline int64_t
+svga_get_time(struct svga_context *svga)
+{
+   return svga->hud.uses_time ? os_time_get() : 0;
+}
+
 
 #endif

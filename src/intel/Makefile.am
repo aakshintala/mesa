@@ -19,4 +19,53 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-SUBDIRS = genxml isl
+include Makefile.sources
+
+# The gallium includes are for the util/u_math.h include from main/macros.h
+AM_CPPFLAGS = \
+	-I$(top_srcdir)/include \
+	-I$(top_builddir)/src \
+	-I$(top_srcdir)/src \
+	-I$(top_builddir)/src/compiler/glsl \
+	-I$(top_srcdir)/src/compiler/glsl \
+	-I$(top_builddir)/src/compiler/nir \
+	-I$(top_srcdir)/src/compiler/nir \
+	-I$(top_srcdir)/src/gtest/include \
+	-I$(top_builddir)/src/intel \
+	-I$(top_srcdir)/src/intel \
+	-I$(top_srcdir)/src/mapi \
+	-I$(top_srcdir)/src/mesa \
+	-I$(top_srcdir)/src/gallium/auxiliary \
+	-I$(top_srcdir)/src/gallium/include \
+	$(VALGRIND_CFLAGS) \
+	$(DEFINES)
+
+AM_CFLAGS = \
+	$(VISIBILITY_CFLAGS) \
+	-Wno-override-init
+
+MKDIR_GEN = $(AM_V_at)$(MKDIR_P) $(@D)
+PYTHON_GEN = $(AM_V_GEN)$(PYTHON2) $(PYTHON_FLAGS)
+
+lib_LTLIBRARIES =
+check_LTLIBRARIES =
+noinst_DATA =
+noinst_HEADERS =
+noinst_LTLIBRARIES =
+noinst_PROGRAMS =
+check_PROGRAMS =
+TESTS =
+BUILT_SOURCES =
+CLEANFILES =
+EXTRA_DIST =
+
+include Makefile.blorp.am
+include Makefile.common.am
+include Makefile.compiler.am
+include Makefile.genxml.am
+include Makefile.isl.am
+include Makefile.tools.am
+
+include Makefile.vulkan.am
+
+CLEANFILES += $(BUILT_SOURCES)

@@ -26,6 +26,7 @@
  */
 
 #include "nir.h"
+#include "nir_instr_set.h"
 
 /*
  * Implements Global Code Motion.  A description of GCM can be found in
@@ -319,18 +320,19 @@ gcm_schedule_late_def(nir_ssa_def *def, void *void_state)
    if (lca == NULL)
       return true;
 
-   /* We know have the LCA of all of the uses.  If our invariants hold,
+   /* We now have the LCA of all of the uses.  If our invariants hold,
     * this is dominated by the block that we chose when scheduling early.
     * We now walk up the dominance tree and pick the lowest block that is
     * as far outside loops as we can get.
     */
    nir_block *best = lca;
-   while (lca != def->parent_instr->block) {
-      assert(lca);
-      if (state->blocks[lca->index].loop_depth <
+   for (nir_block *block = lca; block != NULL; block = block->imm_dom) {
+      if (state->blocks[block->index].loop_depth <
           state->blocks[best->index].loop_depth)
-         best = lca;
-      lca = lca->imm_dom;
+         best = block;
+
+      if (block == def->parent_instr->block)
+         break;
    }
    def->parent_instr->block = best;
 
@@ -451,9 +453,12 @@ gcm_place_instr(nir_instr *instr, struct gcm_state *state)
    block_info->last_instr = instr;
 }
 
-static void
-opt_gcm_impl(nir_function_impl *impl)
+static bool
+opt_gcm_impl(nir_function_impl *impl, bool value_number)
 {
+   nir_metadata_require(impl, nir_metadata_block_index |
+                              nir_metadata_dominance);
+
    struct gcm_state state;
 
    state.impl = impl;
@@ -461,13 +466,22 @@ opt_gcm_impl(nir_function_impl *impl)
    exec_list_make_empty(&state.instrs);
    state.blocks = rzalloc_array(NULL, struct gcm_block_info, impl->num_blocks);
 
-   nir_metadata_require(impl, nir_metadata_block_index |
-                              nir_metadata_dominance);
-
    gcm_build_block_info(&impl->body, &state, 0);
 
    nir_foreach_block(block, impl) {
       gcm_pin_instructions_block(block, &state);
+   }
+
+   bool progress = false;
+   if (value_number) {
+      struct set *gvn_set = nir_instr_set_create(NULL);
+      foreach_list_typed_safe(nir_instr, instr, node, &state.instrs) {
+         if (nir_instr_set_add_or_rewrite(gvn_set, instr)) {
+            nir_instr_remove(instr);
+            progress = true;
+         }
+      }
+      nir_instr_set_destroy(gvn_set);
    }
 
    foreach_list_typed(nir_instr, instr, node, &state.instrs)
@@ -478,18 +492,27 @@ opt_gcm_impl(nir_function_impl *impl)
 
    while (!exec_list_is_empty(&state.instrs)) {
       nir_instr *instr = exec_node_data(nir_instr,
-                                        state.instrs.tail_pred, node);
+                                        state.instrs.tail_sentinel.prev, node);
       gcm_place_instr(instr, &state);
    }
 
    ralloc_free(state.blocks);
+
+   nir_metadata_preserve(impl, nir_metadata_block_index |
+                               nir_metadata_dominance);
+
+   return progress;
 }
 
-void
-nir_opt_gcm(nir_shader *shader)
+bool
+nir_opt_gcm(nir_shader *shader, bool value_number)
 {
+   bool progress = false;
+
    nir_foreach_function(function, shader) {
       if (function->impl)
-         opt_gcm_impl(function->impl);
+         progress |= opt_gcm_impl(function->impl, value_number);
    }
+
+   return progress;
 }

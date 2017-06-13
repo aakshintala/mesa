@@ -25,15 +25,13 @@ git_sha1.h.tmp:
 	@# a gitlink file if $(top_srcdir) is a submodule checkout or a linked
 	@# worktree.
 	@# If we are building from a release tarball copy the bundled header.
+	@touch git_sha1.h.tmp
 	@if test -e $(top_srcdir)/.git; then \
 		if which git > /dev/null; then \
 		    git --git-dir=$(top_srcdir)/.git log -n 1 --oneline | \
 			sed 's/^\([^ ]*\) .*/#define MESA_GIT_SHA1 "git-\1"/' \
 			> git_sha1.h.tmp ; \
 		fi \
-	else \
-		cp $(srcdir)/git_sha1.h git_sha1.h.tmp ;\
-		chmod u+w git_sha1.h.tmp; \
 	fi
 
 git_sha1.h: git_sha1.h.tmp
@@ -45,17 +43,51 @@ git_sha1.h: git_sha1.h.tmp
 	fi
 
 BUILT_SOURCES = git_sha1.h
-
-# We want to keep the srcdir file since we need it on rebuild from tarball.
-# At the same time `make distclean' gets angry at us if we don't cleanup the
-# builddir one.
-distclean-local:
-	( test $(top_srcdir) != $(top_builddir) && rm $(builddir)/git_sha1.h ) || true
+CLEANFILES = $(BUILT_SOURCES)
+EXTRA_DIST =
 
 SUBDIRS = . gtest util mapi/glapi/gen mapi
 
+if HAVE_OPENGL
+gldir = $(includedir)/GL
+gl_HEADERS = \
+  $(top_srcdir)/include/GL/gl.h \
+  $(top_srcdir)/include/GL/glext.h \
+  $(top_srcdir)/include/GL/glcorearb.h \
+  $(top_srcdir)/include/GL/gl_mangle.h
+endif
+
+if HAVE_GLX
+glxdir = $(includedir)/GL
+glx_HEADERS = \
+  $(top_srcdir)/include/GL/glx.h \
+  $(top_srcdir)/include/GL/glxext.h \
+  $(top_srcdir)/include/GL/glx_mangle.h
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = mesa/gl.pc
+endif
+
+if HAVE_COMMON_OSMESA
+osmesadir = $(includedir)/GL
+osmesa_HEADERS = $(top_srcdir)/include/GL/osmesa.h
+endif
+
 # include only conditionally ?
 SUBDIRS += compiler
+
+## Optionally required by GBM, EGL and Vulkan
+if HAVE_PLATFORM_WAYLAND
+SUBDIRS += egl/wayland/wayland-drm
+endif
+
+if HAVE_VULKAN_COMMON
+SUBDIRS += vulkan
+endif
+EXTRA_DIST += vulkan/registry/vk.xml
+
+if HAVE_AMD_DRIVERS
+SUBDIRS += amd
+endif
 
 if HAVE_INTEL_DRIVERS
 SUBDIRS += intel
@@ -69,11 +101,6 @@ SUBDIRS += loader
 
 if HAVE_DRI_GLX
 SUBDIRS += glx
-endif
-
-## Optionally required by GBM and EGL
-if HAVE_PLATFORM_WAYLAND
-SUBDIRS += egl/wayland/wayland-drm
 endif
 
 ## Optionally required by EGL (aka PLATFORM_GBM)
@@ -90,17 +117,18 @@ if HAVE_EGL
 SUBDIRS += egl
 endif
 
-## Requires the i965 compiler (part of mesa) and wayland-drm
-if HAVE_INTEL_VULKAN
-SUBDIRS += intel/vulkan
+# Requires wayland-drm
+if HAVE_RADEON_VULKAN
+SUBDIRS += amd/vulkan
 endif
 
 if HAVE_GALLIUM
 SUBDIRS += gallium
 endif
 
-EXTRA_DIST = \
-	getopt hgl SConscript git_sha1.h
+EXTRA_DIST += \
+	getopt hgl SConscript \
+	$(top_srcdir)/include/GL/mesa_glinterop.h
 
 AM_CFLAGS = $(VISIBILITY_CFLAGS)
 AM_CXXFLAGS = $(VISIBILITY_CXXFLAGS)
@@ -109,12 +137,15 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/include/ \
 	-I$(top_srcdir)/src/mapi/ \
 	-I$(top_srcdir)/src/mesa/ \
+	-I$(top_srcdir)/src/gallium/include \
+	-I$(top_srcdir)/src/gallium/auxiliary \
 	$(DEFINES)
 
 noinst_LTLIBRARIES = libglsl_util.la
 
 libglsl_util_la_SOURCES = \
+	mesa/main/extensions_table.c \
 	mesa/main/imports.c \
-	mesa/program/prog_hash_table.c \
+	mesa/program/prog_parameter.c \
 	mesa/program/symbol_table.c \
 	mesa/program/dummy_errors.c

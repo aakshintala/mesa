@@ -25,10 +25,12 @@
 
 #include "util/u_bitmask.h"
 #include "util/u_memory.h"
+#include "util/u_format.h"
 #include "svga_context.h"
 #include "svga_cmd.h"
 #include "svga_format.h"
 #include "svga_shader.h"
+#include "svga_resource_texture.h"
 
 
 /**
@@ -160,23 +162,50 @@ svga_remap_generic_index(int8_t remap_table[MAX_GENERIC_VARYING],
    return remap_table[generic_index];
 }
 
+static const enum pipe_swizzle copy_alpha[PIPE_SWIZZLE_MAX] = {
+   PIPE_SWIZZLE_X,
+   PIPE_SWIZZLE_Y,
+   PIPE_SWIZZLE_Z,
+   PIPE_SWIZZLE_W,
+   PIPE_SWIZZLE_0,
+   PIPE_SWIZZLE_1,
+   PIPE_SWIZZLE_NONE
+};
+
+static const enum pipe_swizzle set_alpha[PIPE_SWIZZLE_MAX] = {
+   PIPE_SWIZZLE_X,
+   PIPE_SWIZZLE_Y,
+   PIPE_SWIZZLE_Z,
+   PIPE_SWIZZLE_1,
+   PIPE_SWIZZLE_0,
+   PIPE_SWIZZLE_1,
+   PIPE_SWIZZLE_NONE
+};
 
 /**
  * Initialize the shader-neutral fields of svga_compile_key from context
  * state.  This is basically the texture-related state.
  */
 void
-svga_init_shader_key_common(const struct svga_context *svga, unsigned shader,
+svga_init_shader_key_common(const struct svga_context *svga,
+                            enum pipe_shader_type shader,
                             struct svga_compile_key *key)
 {
    unsigned i, idx = 0;
+   const enum pipe_swizzle *swizzle_tab;
 
    assert(shader < ARRAY_SIZE(svga->curr.num_sampler_views));
 
-   for (i = 0; i < svga->curr.num_sampler_views[shader]; i++) {
+   /* In case the number of samplers and sampler_views doesn't match,
+    * loop over the lower of the two counts.
+    */
+   key->num_textures = MIN2(svga->curr.num_sampler_views[shader],
+                            svga->curr.num_samplers[shader]);
+
+   for (i = 0; i < key->num_textures; i++) {
       struct pipe_sampler_view *view = svga->curr.sampler_views[shader][i];
-      if (view) {
-         assert(svga->curr.sampler[shader][i]);
+      const struct svga_sampler_state *sampler = svga->curr.sampler[shader][i];
+      if (view && sampler) {
          assert(view->texture);
          assert(view->texture->target < (1 << 4)); /* texture_target:4 */
 
@@ -195,20 +224,29 @@ svga_init_shader_key_common(const struct svga_context *svga, unsigned shader,
             }
          }
 
-         if (!svga->curr.sampler[shader][i]->normalized_coords) {
+         if (!sampler->normalized_coords) {
             assert(idx < (1 << 5));  /* width_height_idx:5 bitfield */
             key->tex[i].width_height_idx = idx++;
             key->tex[i].unnormalized = TRUE;
             ++key->num_unnormalized_coords;
          }
 
-         key->tex[i].swizzle_r = view->swizzle_r;
-         key->tex[i].swizzle_g = view->swizzle_g;
-         key->tex[i].swizzle_b = view->swizzle_b;
-         key->tex[i].swizzle_a = view->swizzle_a;
+         swizzle_tab = (!util_format_has_alpha(view->format) &&
+                        svga_texture_device_format_has_alpha(view->texture)) ?
+            set_alpha : copy_alpha;
+
+         /* If we have a non-alpha view into an svga3d surface with an
+          * alpha channel, then explicitly set the alpha channel to 1
+          * when sampling. Note that we need to check the
+          * actual device format to cover also imported surface cases.
+          */
+
+         key->tex[i].swizzle_r = swizzle_tab[view->swizzle_r];
+         key->tex[i].swizzle_g = swizzle_tab[view->swizzle_g];
+         key->tex[i].swizzle_b = swizzle_tab[view->swizzle_b];
+         key->tex[i].swizzle_a = swizzle_tab[view->swizzle_a];
       }
    }
-   key->num_textures = svga->curr.num_sampler_views[shader];
 }
 
 
@@ -345,19 +383,22 @@ svga_define_shader(struct svga_context *svga,
    unsigned codeLen = variant->nr_tokens * sizeof(variant->tokens[0]);
    enum pipe_error ret;
 
+   SVGA_STATS_TIME_PUSH(svga_sws(svga), SVGA_STATS_TIME_DEFINESHADER);
+
    variant->id = UTIL_BITMASK_INVALID_INDEX;
 
    if (svga_have_gb_objects(svga)) {
       if (svga_have_vgpu10(svga))
-         return define_gb_shader_vgpu10(svga, type, variant, codeLen);
+         ret = define_gb_shader_vgpu10(svga, type, variant, codeLen);
       else
-         return define_gb_shader_vgpu9(svga, type, variant, codeLen);
+         ret = define_gb_shader_vgpu9(svga, type, variant, codeLen);
    }
    else {
       /* Allocate an integer ID for the shader */
       variant->id = util_bitmask_add(svga->shader_id_bm);
       if (variant->id == UTIL_BITMASK_INVALID_INDEX) {
-         return PIPE_ERROR_OUT_OF_MEMORY;
+         ret = PIPE_ERROR_OUT_OF_MEMORY;
+         goto done;
       }
 
       /* Issue SVGA3D device command to define the shader */
@@ -374,6 +415,8 @@ svga_define_shader(struct svga_context *svga,
       }
    }
 
+done:
+   SVGA_STATS_TIME_POP(svga_sws(svga));
    return ret;
 }
 

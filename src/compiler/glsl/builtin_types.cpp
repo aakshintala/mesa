@@ -177,7 +177,7 @@ static const struct builtin_type_versions {
    T(samplerCube,                     110, 100)
    T(sampler1DArray,                  130, 999)
    T(sampler2DArray,                  130, 300)
-   T(samplerCubeArray,                400, 999)
+   T(samplerCubeArray,                400, 320)
    T(sampler2DRect,                   140, 999)
    T(samplerBuffer,                   140, 320)
    T(sampler2DMS,                     150, 310)
@@ -189,7 +189,7 @@ static const struct builtin_type_versions {
    T(isamplerCube,                    130, 300)
    T(isampler1DArray,                 130, 999)
    T(isampler2DArray,                 130, 300)
-   T(isamplerCubeArray,               400, 999)
+   T(isamplerCubeArray,               400, 320)
    T(isampler2DRect,                  140, 999)
    T(isamplerBuffer,                  140, 320)
    T(isampler2DMS,                    150, 310)
@@ -201,7 +201,7 @@ static const struct builtin_type_versions {
    T(usamplerCube,                    130, 300)
    T(usampler1DArray,                 130, 999)
    T(usampler2DArray,                 130, 300)
-   T(usamplerCubeArray,               400, 999)
+   T(usamplerCubeArray,               400, 320)
    T(usampler2DRect,                  140, 999)
    T(usamplerBuffer,                  140, 320)
    T(usampler2DMS,                    150, 310)
@@ -212,7 +212,7 @@ static const struct builtin_type_versions {
    T(samplerCubeShadow,               130, 300)
    T(sampler1DArrayShadow,            130, 999)
    T(sampler2DArrayShadow,            130, 300)
-   T(samplerCubeArrayShadow,          400, 999)
+   T(samplerCubeArrayShadow,          400, 320)
    T(sampler2DRectShadow,             140, 999)
 
    T(struct_gl_DepthRangeParameters,  110, 100)
@@ -225,7 +225,7 @@ static const struct builtin_type_versions {
    T(imageBuffer,                     420, 320)
    T(image1DArray,                    420, 999)
    T(image2DArray,                    420, 310)
-   T(imageCubeArray,                  420, 999)
+   T(imageCubeArray,                  420, 320)
    T(image2DMS,                       420, 999)
    T(image2DMSArray,                  420, 999)
    T(iimage1D,                        420, 999)
@@ -236,7 +236,7 @@ static const struct builtin_type_versions {
    T(iimageBuffer,                    420, 320)
    T(iimage1DArray,                   420, 999)
    T(iimage2DArray,                   420, 310)
-   T(iimageCubeArray,                 420, 999)
+   T(iimageCubeArray,                 420, 320)
    T(iimage2DMS,                      420, 999)
    T(iimage2DMSArray,                 420, 999)
    T(uimage1D,                        420, 999)
@@ -247,7 +247,7 @@ static const struct builtin_type_versions {
    T(uimageBuffer,                    420, 320)
    T(uimage1DArray,                   420, 999)
    T(uimage2DArray,                   420, 310)
-   T(uimageCubeArray,                 420, 999)
+   T(uimageCubeArray,                 420, 320)
    T(uimage2DMS,                      420, 999)
    T(uimage2DMSArray,                 420, 999)
 
@@ -288,7 +288,7 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
    /* Add deprecated structure types.  While these were deprecated in 1.30,
     * they're still present.  We've removed them in 1.40+ (OpenGL 3.1+).
     */
-   if (!state->es_shader && state->language_version < 140) {
+   if (state->compat_shader) {
       for (unsigned i = 0; i < ARRAY_SIZE(deprecated_types); i++) {
          add_type(symbols, deprecated_types[i]);
       }
@@ -298,7 +298,9 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
     * by the version-based loop, but attempting to add them a second time
     * is harmless.
     */
-   if (state->ARB_texture_cube_map_array_enable) {
+   if (state->ARB_texture_cube_map_array_enable ||
+       state->EXT_texture_cube_map_array_enable ||
+       state->OES_texture_cube_map_array_enable) {
       add_type(symbols, glsl_type::samplerCubeArray_type);
       add_type(symbols, glsl_type::samplerCubeArrayShadow_type);
       add_type(symbols, glsl_type::isamplerCubeArray_type);
@@ -337,6 +339,14 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
       add_type(symbols, glsl_type::sampler3D_type);
    }
 
+   if (state->ARB_shader_image_load_store_enable ||
+       state->EXT_texture_cube_map_array_enable ||
+       state->OES_texture_cube_map_array_enable) {
+      add_type(symbols, glsl_type::imageCubeArray_type);
+      add_type(symbols, glsl_type::iimageCubeArray_type);
+      add_type(symbols, glsl_type::uimageCubeArray_type);
+   }
+
    if (state->ARB_shader_image_load_store_enable) {
       add_type(symbols, glsl_type::image1D_type);
       add_type(symbols, glsl_type::image2D_type);
@@ -346,7 +356,6 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
       add_type(symbols, glsl_type::imageBuffer_type);
       add_type(symbols, glsl_type::image1DArray_type);
       add_type(symbols, glsl_type::image2DArray_type);
-      add_type(symbols, glsl_type::imageCubeArray_type);
       add_type(symbols, glsl_type::image2DMS_type);
       add_type(symbols, glsl_type::image2DMSArray_type);
       add_type(symbols, glsl_type::iimage1D_type);
@@ -357,7 +366,6 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
       add_type(symbols, glsl_type::iimageBuffer_type);
       add_type(symbols, glsl_type::iimage1DArray_type);
       add_type(symbols, glsl_type::iimage2DArray_type);
-      add_type(symbols, glsl_type::iimageCubeArray_type);
       add_type(symbols, glsl_type::iimage2DMS_type);
       add_type(symbols, glsl_type::iimage2DMSArray_type);
       add_type(symbols, glsl_type::uimage1D_type);
@@ -368,7 +376,6 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
       add_type(symbols, glsl_type::uimageBuffer_type);
       add_type(symbols, glsl_type::uimage1DArray_type);
       add_type(symbols, glsl_type::uimage2DArray_type);
-      add_type(symbols, glsl_type::uimageCubeArray_type);
       add_type(symbols, glsl_type::uimage2DMS_type);
       add_type(symbols, glsl_type::uimage2DMSArray_type);
    }
@@ -401,6 +408,18 @@ _mesa_glsl_initialize_types(struct _mesa_glsl_parse_state *state)
       add_type(symbols, glsl_type::dmat3x4_type);
       add_type(symbols, glsl_type::dmat4x2_type);
       add_type(symbols, glsl_type::dmat4x3_type);
+   }
+
+   if (state->ARB_gpu_shader_int64_enable) {
+      add_type(symbols, glsl_type::int64_t_type);
+      add_type(symbols, glsl_type::i64vec2_type);
+      add_type(symbols, glsl_type::i64vec3_type);
+      add_type(symbols, glsl_type::i64vec4_type);
+
+      add_type(symbols, glsl_type::uint64_t_type);
+      add_type(symbols, glsl_type::u64vec2_type);
+      add_type(symbols, glsl_type::u64vec3_type);
+      add_type(symbols, glsl_type::u64vec4_type);
    }
 }
 /** @} */

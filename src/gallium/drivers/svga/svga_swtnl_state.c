@@ -84,6 +84,9 @@ static void set_draw_viewport( struct svga_context *svga )
          adjx += SVGA_TRIANGLE_ADJ_X;
          adjy += SVGA_TRIANGLE_ADJ_Y;
          break;
+      default:
+         /* nothing */
+         break;
       }
    }
 
@@ -97,6 +100,8 @@ static enum pipe_error
 update_swtnl_draw( struct svga_context *svga,
                    unsigned dirty )
 {
+   SVGA_STATS_TIME_PUSH(svga_sws(svga), SVGA_STATS_TIME_SWTNLUPDATEDRAW);
+
    draw_flush( svga->swtnl.draw );
 
    if (dirty & SVGA_NEW_VS) 
@@ -141,6 +146,7 @@ update_swtnl_draw( struct svga_context *svga,
          (svga->curr.framebuffer.zsbuf) ?
              svga->curr.framebuffer.zsbuf->format : PIPE_FORMAT_NONE);
 
+   SVGA_STATS_TIME_POP(svga_sws(svga));
    return PIPE_OK;
 }
 
@@ -227,6 +233,8 @@ svga_swtnl_update_vdecl( struct svga_context *svga )
    unsigned i;
    int any_change;
 
+   SVGA_STATS_TIME_PUSH(svga_sws(svga), SVGA_STATS_TIME_SWTNLUPDATEVDECL);
+
    memset(vinfo, 0, sizeof(*vinfo));
    memset(vdecl, 0, sizeof(vdecl));
 
@@ -299,7 +307,7 @@ svga_swtnl_update_vdecl( struct svga_context *svga )
       enum pipe_error ret;
 
       if (!any_change && svga_render->layout_id != SVGA3D_INVALID_ID) {
-         return PIPE_OK;
+         goto done;
       }
 
       if (svga_render->layout_id != SVGA3D_INVALID_ID) {
@@ -343,13 +351,15 @@ svga_swtnl_update_vdecl( struct svga_context *svga )
    }
    else {
       if (!any_change)
-         return PIPE_OK;
+         goto done;
    }
 
    memcpy(svga_render->vdecl, vdecl, sizeof(vdecl));
    svga->swtnl.new_vdecl = TRUE;
 
-   return 0;
+done:
+   SVGA_STATS_TIME_POP(svga_sws(svga));
+   return PIPE_OK;
 }
 
 

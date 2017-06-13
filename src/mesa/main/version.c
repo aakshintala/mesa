@@ -111,7 +111,7 @@ exit:
 }
 
 /**
- * Builds the MESA version string.
+ * Builds the Mesa version string.
  */
 static void
 create_version_string(struct gl_context *ctx, const char *prefix)
@@ -327,7 +327,6 @@ compute_version(const struct gl_extensions *extensions,
                          extensions->ARB_gpu_shader5 &&
                          extensions->ARB_gpu_shader_fp64 &&
                          extensions->ARB_sample_shading &&
-                         extensions->ARB_shader_subroutine &&
                          extensions->ARB_tessellation_shader &&
                          extensions->ARB_texture_buffer_object_rgb32 &&
                          extensions->ARB_texture_cube_map_array &&
@@ -530,18 +529,19 @@ compute_version_es2(const struct gl_extensions *extensions,
                          extensions->ARB_gpu_shader5 &&
                          extensions->EXT_shader_integer_mix);
    const bool ver_3_2 = (ver_3_1 &&
-                         /*extensions->KHR_blend_equation_advanced*/ false &&
+                         extensions->KHR_blend_equation_advanced &&
+                         extensions->KHR_robustness &&
                          extensions->KHR_texture_compression_astc_ldr &&
                          extensions->OES_copy_image &&
                          extensions->ARB_draw_buffers_blend &&
                          extensions->ARB_draw_elements_base_vertex &&
                          extensions->OES_geometry_shader &&
-                         /*extensions->OES_primitive_bounding_box*/ false &&
+                         extensions->OES_primitive_bounding_box &&
                          extensions->OES_sample_variables &&
                          extensions->ARB_tessellation_shader &&
                          extensions->ARB_texture_border_clamp &&
                          extensions->OES_texture_buffer &&
-                         extensions->ARB_texture_cube_map_array &&
+                         extensions->OES_texture_cube_map_array &&
                          extensions->ARB_texture_stencil8);
 
    if (ver_3_2) {
@@ -565,8 +565,10 @@ _mesa_get_version(const struct gl_extensions *extensions,
    case API_OPENGL_COMPAT:
       /* Disable GLSL 1.40 and later for legacy contexts.
        * This disallows creation of the GL 3.1 compatibility context. */
-      if (consts->GLSLVersion > 130) {
-         consts->GLSLVersion = 130;
+      if (!consts->AllowHigherCompatVersion) {
+         if (consts->GLSLVersion > 130) {
+            consts->GLSLVersion = 130;
+         }
       }
       /* fall through */
    case API_OPENGL_CORE:

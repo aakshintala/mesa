@@ -27,14 +27,17 @@
 * Notes:
 *
 ******************************************************************************/
+#include "builder.h"
 #include "jit_api.h"
 #include "streamout_jit.h"
-#include "builder.h"
-#include "state_llvm.h"
+#include "gen_state_llvm.h"
 #include "llvm/IR/DataLayout.h"
 
 #include <sstream>
 #include <unordered_set>
+
+using namespace llvm;
+using namespace SwrJit;
 
 //////////////////////////////////////////////////////////////////////////
 /// Interface to Jitting a fetch shader
@@ -156,7 +159,11 @@ struct StreamOutJit : public Builder
 
             // cast input to <4xfloat>
             Value* src = BITCAST(vpackedAttrib, simd4Ty);
-            CALL(maskStore, {pOut, ToMask(packedMask), src});
+
+            // cast mask to <4xint>
+            Value* mask = ToMask(packedMask);
+            mask = BITCAST(mask, VectorType::get(IRB()->getInt32Ty(), 4));
+            CALL(maskStore, {pOut, mask, src});
         }
 
         // increment SO buffer
@@ -234,7 +241,7 @@ struct StreamOutJit : public Builder
 
             // increment stream and output buffer pointers
             // stream verts are always 32*4 dwords apart
-            pStreamData = GEP(pStreamData, C(KNOB_NUM_ATTRIBUTES * 4));
+            pStreamData = GEP(pStreamData, C(SWR_VTX_NUM_SLOTS * 4));
 
             // output buffers offset using pitch in buffer state
             for (uint32_t b : activeSOBuffers)
@@ -278,7 +285,7 @@ struct StreamOutJit : public Builder
         IRB()->SetInsertPoint(entry);
 
         // arguments
-        auto argitr = soFunc->getArgumentList().begin();
+        auto argitr = soFunc->arg_begin();
         Value* pSoCtx = &*argitr++;
         pSoCtx->setName("pSoCtx");
 

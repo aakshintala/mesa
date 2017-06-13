@@ -47,6 +47,24 @@ struct vc4_exec_info;
 #define max(x, y) MAX2(x, y)
 #define min(x, y) MIN2(x, y)
 #define BUG_ON(condition) assert(!(condition))
+#define BIT(bit) (1u << bit)
+
+/* Unsigned long-based bitmap interface in the linux kernel */
+#define BITMAP_WORDBITS (sizeof(unsigned long) * 8)
+#define BITS_TO_LONGS(bits) (roundup(bits, BITMAP_WORDBITS) / \
+                             sizeof(unsigned long))
+static inline bool
+test_bit(unsigned int bit, unsigned long *addr)
+{
+        return addr[bit / BITMAP_WORDBITS] & (1ul << (bit % BITMAP_WORDBITS));
+}
+
+static inline bool
+set_bit(unsigned int bit, unsigned long *addr)
+{
+        return addr[bit / BITMAP_WORDBITS] |= (1ul << (bit % BITMAP_WORDBITS));
+}
+
 
 static inline int
 copy_from_user(void *dst, void *src, size_t size)
@@ -60,8 +78,7 @@ typedef uint16_t u16;
 typedef uint32_t u32;
 
 struct drm_device {
-        struct vc4_context *vc4;
-        uint32_t simulator_mem_next;
+        struct vc4_screen *screen;
 };
 
 struct drm_gem_object {

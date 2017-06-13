@@ -208,14 +208,17 @@ static boolean parse_int( const char **pcur, int *val )
    return FALSE;
 }
 
-static boolean parse_identifier( const char **pcur, char *ret )
+static boolean parse_identifier( const char **pcur, char *ret, size_t len )
 {
    const char *cur = *pcur;
    int i = 0;
    if (is_alpha_underscore( cur )) {
       ret[i++] = *cur++;
-      while (is_alpha_underscore( cur ) || is_digit( cur ))
+      while (is_alpha_underscore( cur ) || is_digit( cur )) {
+         if (i == len - 1)
+            return FALSE;
          ret[i++] = *cur++;
+      }
       ret[i++] = '\0';
       *pcur = cur;
       return TRUE;
@@ -286,6 +289,42 @@ static boolean parse_double( const char **pcur, uint32_t *val0, uint32_t *val1)
    } v;
 
    v.dval = strtod(cur, (char**)pcur);
+   if (*pcur == cur)
+      return FALSE;
+
+   *val0 = v.uval[0];
+   *val1 = v.uval[1];
+
+   return TRUE;
+}
+
+static boolean parse_int64( const char **pcur, uint32_t *val0, uint32_t *val1)
+{
+   const char *cur = *pcur;
+   union {
+      int64_t i64val;
+      uint32_t uval[2];
+   } v;
+
+   v.i64val = strtoll(cur, (char**)pcur, 0);
+   if (*pcur == cur)
+      return FALSE;
+
+   *val0 = v.uval[0];
+   *val1 = v.uval[1];
+
+   return TRUE;
+}
+
+static boolean parse_uint64( const char **pcur, uint32_t *val0, uint32_t *val1)
+{
+   const char *cur = *pcur;
+   union {
+      uint64_t u64val;
+      uint32_t uval[2];
+   } v;
+
+   v.u64val = strtoull(cur, (char**)pcur, 0);
    if (*pcur == cur)
       return FALSE;
 
@@ -997,43 +1036,6 @@ parse_instruction(
 
    inst = tgsi_default_full_instruction();
 
-   /* Parse predicate.
-    */
-   eat_opt_white( &ctx->cur );
-   if (*ctx->cur == '(') {
-      uint file;
-      int index;
-      uint swizzle[4];
-      boolean parsed_swizzle;
-
-      inst.Instruction.Predicate = 1;
-
-      ctx->cur++;
-      if (*ctx->cur == '!') {
-         ctx->cur++;
-         inst.Predicate.Negate = 1;
-      }
-
-      if (!parse_register_1d( ctx, &file, &index ))
-         return FALSE;
-
-      if (parse_optional_swizzle( ctx, swizzle, &parsed_swizzle, 4 )) {
-         if (parsed_swizzle) {
-            inst.Predicate.SwizzleX = swizzle[0];
-            inst.Predicate.SwizzleY = swizzle[1];
-            inst.Predicate.SwizzleZ = swizzle[2];
-            inst.Predicate.SwizzleW = swizzle[3];
-         }
-      }
-
-      if (*ctx->cur != ')') {
-         report_error( ctx, "Expected `)'" );
-         return FALSE;
-      }
-
-      ctx->cur++;
-   }
-
    /* Parse instruction name.
     */
    eat_opt_white( &ctx->cur );
@@ -1124,7 +1126,7 @@ parse_instruction(
 
    cur = ctx->cur;
    eat_opt_white( &cur );
-   for (i = 0; inst.Instruction.Texture && *cur == ','; i++) {
+   for (i = 0; inst.Instruction.Texture && *cur == ',' && i < TGSI_FULL_MAX_TEX_OFFSETS; i++) {
          cur++;
          eat_opt_white( &cur );
          ctx->cur = cur;
@@ -1226,6 +1228,14 @@ static boolean parse_immediate_data(struct translate_ctx *ctx, unsigned type,
       switch (type) {
       case TGSI_IMM_FLOAT64:
          ret = parse_double(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
+         i++;
+         break;
+      case TGSI_IMM_INT64:
+         ret = parse_int64(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
+         i++;
+         break;
+      case TGSI_IMM_UINT64:
+         ret = parse_uint64(&ctx->cur, &values[i].Uint, &values[i+1].Uint);
          i++;
          break;
       case TGSI_IMM_FLOAT32:
@@ -1502,6 +1512,54 @@ static boolean parse_declaration( struct translate_ctx *ctx )
 
    cur = ctx->cur;
    eat_opt_white( &cur );
+   if (*cur == ',' &&
+       file == TGSI_FILE_OUTPUT && ctx->processor == PIPE_SHADER_GEOMETRY) {
+      cur++;
+      eat_opt_white(&cur);
+      if (str_match_nocase_whole(&cur, "STREAM")) {
+         uint stream[4];
+
+         eat_opt_white(&cur);
+         if (*cur != '(') {
+            report_error(ctx, "Expected '('");
+            return FALSE;
+         }
+         cur++;
+
+         for (int i = 0; i < 4; ++i) {
+            eat_opt_white(&cur);
+            if (!parse_uint(&cur, &stream[i])) {
+               report_error(ctx, "Expected literal integer");
+               return FALSE;
+            }
+
+            eat_opt_white(&cur);
+            if (i < 3) {
+               if (*cur != ',') {
+                  report_error(ctx, "Expected ','");
+                  return FALSE;
+               }
+               cur++;
+            }
+         }
+
+         if (*cur != ')') {
+            report_error(ctx, "Expected ')'");
+            return FALSE;
+         }
+         cur++;
+
+         decl.Semantic.StreamX = stream[0];
+         decl.Semantic.StreamY = stream[1];
+         decl.Semantic.StreamZ = stream[2];
+         decl.Semantic.StreamW = stream[3];
+
+         ctx->cur = cur;
+      }
+   }
+
+   cur = ctx->cur;
+   eat_opt_white( &cur );
    if (*cur == ',' && !is_vs_input) {
       uint i;
 
@@ -1695,7 +1753,7 @@ static boolean parse_property( struct translate_ctx *ctx )
       report_error( ctx, "Syntax error" );
       return FALSE;
    }
-   if (!parse_identifier( &ctx->cur, id )) {
+   if (!parse_identifier( &ctx->cur, id, sizeof(id) )) {
       report_error( ctx, "Syntax error" );
       return FALSE;
    }

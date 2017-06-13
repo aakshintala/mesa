@@ -196,12 +196,9 @@ st_bufferobj_data(struct gl_context *ctx,
           * This should be the same as creating a new buffer, but we avoid
           * a lot of validation in Mesa.
           */
-         struct pipe_box box;
-
-         u_box_1d(0, size, &box);
-         pipe->transfer_inline_write(pipe, st_obj->buffer, 0,
-                                    PIPE_TRANSFER_DISCARD_WHOLE_RESOURCE,
-                                    &box, data, 0, 0);
+         pipe->buffer_subdata(pipe, st_obj->buffer,
+                              PIPE_TRANSFER_DISCARD_WHOLE_RESOURCE,
+                              0, size, data);
          return GL_TRUE;
       } else if (screen->get_param(screen, PIPE_CAP_INVALIDATE_BUFFER)) {
          pipe->invalidate_resource(pipe, st_obj->buffer);
@@ -251,10 +248,14 @@ st_bufferobj_data(struct gl_context *ctx,
    /* Set usage. */
    if (st_obj->Base.Immutable) {
       /* BufferStorage */
-      if (storageFlags & GL_CLIENT_STORAGE_BIT)
-         pipe_usage = PIPE_USAGE_STAGING;
-      else
+      if (storageFlags & GL_CLIENT_STORAGE_BIT) {
+         if (storageFlags & GL_MAP_READ_BIT)
+            pipe_usage = PIPE_USAGE_STAGING;
+         else
+            pipe_usage = PIPE_USAGE_STREAM;
+      } else {
          pipe_usage = PIPE_USAGE_DEFAULT;
+      }
    }
    else {
       /* BufferData */
@@ -292,6 +293,8 @@ st_bufferobj_data(struct gl_context *ctx,
       pipe_flags |= PIPE_RESOURCE_FLAG_MAP_PERSISTENT;
    if (storageFlags & GL_MAP_COHERENT_BIT)
       pipe_flags |= PIPE_RESOURCE_FLAG_MAP_COHERENT;
+   if (storageFlags & GL_SPARSE_STORAGE_BIT_ARB)
+      pipe_flags |= PIPE_RESOURCE_FLAG_SPARSE;
 
    pipe_resource_reference( &st_obj->buffer, NULL );
 
@@ -336,15 +339,15 @@ st_bufferobj_data(struct gl_context *ctx,
     * might be using it.
     */
    /* TODO: Add arrays to usage history */
-   st->dirty.st |= ST_NEW_VERTEX_ARRAYS;
+   ctx->NewDriverState |= ST_NEW_VERTEX_ARRAYS;
    if (st_obj->Base.UsageHistory & USAGE_UNIFORM_BUFFER)
-      st->dirty.st |= ST_NEW_UNIFORM_BUFFER;
+      ctx->NewDriverState |= ST_NEW_UNIFORM_BUFFER;
    if (st_obj->Base.UsageHistory & USAGE_SHADER_STORAGE_BUFFER)
-      st->dirty.st |= ST_NEW_STORAGE_BUFFER;
+      ctx->NewDriverState |= ST_NEW_STORAGE_BUFFER;
    if (st_obj->Base.UsageHistory & USAGE_TEXTURE_BUFFER)
-      st->dirty.st |= ST_NEW_SAMPLER_VIEWS | ST_NEW_IMAGE_UNITS;
+      ctx->NewDriverState |= ST_NEW_SAMPLER_VIEWS | ST_NEW_IMAGE_UNITS;
    if (st_obj->Base.UsageHistory & USAGE_ATOMIC_COUNTER_BUFFER)
-      st->dirty.st |= ST_NEW_ATOMIC_BUFFER;
+      ctx->NewDriverState |= ST_NEW_ATOMIC_BUFFER;
 
    return GL_TRUE;
 }
@@ -558,14 +561,28 @@ st_bufferobj_validate_usage(struct st_context *st,
 {
 }
 
+static void
+st_bufferobj_page_commitment(struct gl_context *ctx,
+                             struct gl_buffer_object *bufferObj,
+                             GLintptr offset, GLsizeiptr size,
+                             GLboolean commit)
+{
+   struct pipe_context *pipe = st_context(ctx)->pipe;
+   struct st_buffer_object *buf = st_buffer_object(bufferObj);
+   struct pipe_box box;
+
+   u_box_1d(offset, size, &box);
+
+   if (!pipe->resource_commit(pipe, buf->buffer, 0, &box, commit)) {
+      _mesa_error(ctx, GL_OUT_OF_MEMORY, "glBufferPageCommitmentARB(out of memory)");
+      return;
+   }
+}
 
 void
 st_init_bufferobject_functions(struct pipe_screen *screen,
                                struct dd_function_table *functions)
 {
-   /* plug in default driver fallbacks (such as for ClearBufferSubData) */
-   _mesa_init_buffer_object_functions(functions);
-
    functions->NewBufferObject = st_bufferobj_alloc;
    functions->DeleteBuffer = st_bufferobj_free;
    functions->BufferData = st_bufferobj_data;
@@ -576,6 +593,7 @@ st_init_bufferobject_functions(struct pipe_screen *screen,
    functions->UnmapBuffer = st_bufferobj_unmap;
    functions->CopyBufferSubData = st_copy_buffer_subdata;
    functions->ClearBufferSubData = st_clear_buffer_subdata;
+   functions->BufferPageCommitment = st_bufferobj_page_commitment;
 
    if (screen->get_param(screen, PIPE_CAP_INVALIDATE_BUFFER))
       functions->InvalidateBufferSubData = st_bufferobj_invalidate;

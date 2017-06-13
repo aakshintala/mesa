@@ -49,6 +49,7 @@
 #include "intel_screen.h"
 #include "intel_tex.h"
 #include "brw_context.h"
+#include "brw_defines.h"
 
 #define FILE_DEBUG_FLAG DEBUG_FBO
 
@@ -281,7 +282,7 @@ intel_alloc_private_renderbuffer_storage(struct gl_context * ctx, struct gl_rend
                                          GLuint width, GLuint height)
 {
    struct brw_context *brw = brw_context(ctx);
-   struct intel_screen *screen = brw->intelScreen;
+   struct intel_screen *screen = brw->screen;
    struct intel_renderbuffer *irb = intel_renderbuffer(rb);
 
    assert(rb->Format != MESA_FORMAT_NONE);
@@ -331,12 +332,11 @@ intel_image_target_renderbuffer_storage(struct gl_context *ctx,
 {
    struct brw_context *brw = brw_context(ctx);
    struct intel_renderbuffer *irb;
-   __DRIscreen *screen;
+   __DRIscreen *dri_screen = brw->screen->driScrnPriv;
    __DRIimage *image;
 
-   screen = brw->intelScreen->driScrnPriv;
-   image = screen->dri2.image->lookupEGLImage(screen, image_handle,
-					      screen->loaderPrivate);
+   image = dri_screen->dri2.image->lookupEGLImage(dri_screen, image_handle,
+                                                  dri_screen->loaderPrivate);
    if (image == NULL)
       return;
 
@@ -373,6 +373,19 @@ intel_image_target_renderbuffer_storage(struct gl_context *ctx,
                                          MIPTREE_LAYOUT_DISABLE_AUX);
    if (!irb->mt)
       return;
+
+   /* Adjust the miptree's upper-left coordinate.
+    *
+    * FIXME: Adjusting the miptree's layout outside of
+    * intel_miptree_create_layout() is fragile. Plumb the adjustment through
+    * intel_miptree_create_layout() and brw_tex_layout().
+    */
+   irb->mt->level[0].level_x = image->tile_x;
+   irb->mt->level[0].level_y = image->tile_y;
+   irb->mt->level[0].slice[0].x_offset = image->tile_x;
+   irb->mt->level[0].slice[0].y_offset = image->tile_y;
+   irb->mt->total_width += image->tile_x;
+   irb->mt->total_height += image->tile_y;
 
    rb->InternalFormat = image->internal_format;
    rb->Width = image->width;
@@ -418,26 +431,20 @@ intel_nop_alloc_storage(struct gl_context * ctx, struct gl_renderbuffer *rb,
 }
 
 /**
- * Create a new intel_renderbuffer which corresponds to an on-screen window,
- * not a user-created renderbuffer.
+ * Create an intel_renderbuffer for a __DRIdrawable. This function is
+ * unrelated to GL renderbuffers (that is, those created by
+ * glGenRenderbuffers).
  *
  * \param num_samples must be quantized.
  */
 struct intel_renderbuffer *
-intel_create_renderbuffer(mesa_format format, unsigned num_samples)
+intel_create_winsys_renderbuffer(mesa_format format, unsigned num_samples)
 {
-   struct intel_renderbuffer *irb;
-   struct gl_renderbuffer *rb;
-
-   GET_CURRENT_CONTEXT(ctx);
-
-   irb = CALLOC_STRUCT(intel_renderbuffer);
-   if (!irb) {
-      _mesa_error(ctx, GL_OUT_OF_MEMORY, "creating renderbuffer");
+   struct intel_renderbuffer *irb = CALLOC_STRUCT(intel_renderbuffer);
+   if (!irb)
       return NULL;
-   }
 
-   rb = &irb->Base.Base;
+   struct gl_renderbuffer *rb = &irb->Base.Base;
    irb->layer_count = 1;
 
    _mesa_init_renderbuffer(rb, 0);
@@ -456,7 +463,7 @@ intel_create_renderbuffer(mesa_format format, unsigned num_samples)
 
 /**
  * Private window-system buffers (as opposed to ones shared with the display
- * server created with intel_create_renderbuffer()) are most similar in their
+ * server created with intel_create_winsys_renderbuffer()) are most similar in their
  * handling to user-created renderbuffers, but they have a resize handler that
  * may be called at intel_update_renderbuffers() time.
  *
@@ -467,7 +474,7 @@ intel_create_private_renderbuffer(mesa_format format, unsigned num_samples)
 {
    struct intel_renderbuffer *irb;
 
-   irb = intel_create_renderbuffer(format, num_samples);
+   irb = intel_create_winsys_renderbuffer(format, num_samples);
    irb->Base.Base.AllocStorage = intel_alloc_private_renderbuffer_storage;
 
    return irb;
@@ -527,7 +534,7 @@ intel_renderbuffer_update_wrapper(struct brw_context *brw,
    switch (mt->msaa_layout) {
       case INTEL_MSAA_LAYOUT_UMS:
       case INTEL_MSAA_LAYOUT_CMS:
-         layer_multiplier = mt->num_samples;
+         layer_multiplier = MAX2(mt->num_samples, 1);
          break;
 
       default:
@@ -828,6 +835,14 @@ intel_blit_framebuffer_with_blitter(struct gl_context *ctx,
             return mask;
          }
 
+         if (ctx->Color.sRGBEnabled &&
+             _mesa_get_format_color_encoding(src_irb->mt->format) !=
+             _mesa_get_format_color_encoding(dst_irb->mt->format)) {
+            perf_debug("glBlitFramebuffer() with sRGB conversion cannot be "
+                       "handled by BLT path.\n");
+            return mask;
+         }
+
          if (!intel_miptree_blit(brw,
                                  src_irb->mt,
                                  src_irb->mt_level, src_irb->mt_layer,
@@ -865,6 +880,22 @@ intel_blit_framebuffer(struct gl_context *ctx,
    if (!_mesa_check_conditional_render(ctx))
       return;
 
+   if (brw->gen < 6) {
+      /* On gen4-5, try BLT first.
+       *
+       * Gen4-5 have a single ring for both 3D and BLT operations, so there's
+       * no inter-ring synchronization issues like on Gen6+.  It is apparently
+       * faster than using the 3D pipeline.  Original Gen4 also has to rebase
+       * and copy miptree slices in order to render to unaligned locations.
+       */
+      mask = intel_blit_framebuffer_with_blitter(ctx, readFb, drawFb,
+                                                 srcX0, srcY0, srcX1, srcY1,
+                                                 dstX0, dstY0, dstX1, dstY1,
+                                                 mask);
+      if (mask == 0x0)
+         return;
+   }
+
    mask = brw_blorp_framebuffer(brw, readFb, drawFb,
                                 srcX0, srcY0, srcX1, srcY1,
                                 dstX0, dstY0, dstX1, dstY1,
@@ -898,98 +929,12 @@ intel_blit_framebuffer(struct gl_context *ctx,
 }
 
 /**
- * Gen4-5 implementation of glBlitFrameBuffer().
- *
- * Tries BLT, Meta, then swrast.
- *
- * Gen4-5 have a single ring for both 3D and BLT operations, so there's no
- * inter-ring synchronization issues like on Gen6+.  It is apparently faster
- * than using the 3D pipeline.  Original Gen4 also has to rebase and copy
- * miptree slices in order to render to unaligned locations.
- */
-static void
-gen4_blit_framebuffer(struct gl_context *ctx,
-                      struct gl_framebuffer *readFb,
-                      struct gl_framebuffer *drawFb,
-                      GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
-                      GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                      GLbitfield mask, GLenum filter)
-{
-   /* Page 679 of OpenGL 4.4 spec says:
-    * "Added BlitFramebuffer to commands affected by conditional rendering in
-    *  section 10.10 (Bug 9562)."
-    */
-   if (!_mesa_check_conditional_render(ctx))
-      return;
-
-   mask = intel_blit_framebuffer_with_blitter(ctx, readFb, drawFb,
-                                              srcX0, srcY0, srcX1, srcY1,
-                                              dstX0, dstY0, dstX1, dstY1,
-                                              mask);
-   if (mask == 0x0)
-      return;
-
-   mask = _mesa_meta_BlitFramebuffer(ctx, readFb, drawFb,
-                                     srcX0, srcY0, srcX1, srcY1,
-                                     dstX0, dstY0, dstX1, dstY1,
-                                     mask, filter);
-   if (mask == 0x0)
-      return;
-
-   _swrast_BlitFramebuffer(ctx, readFb, drawFb,
-                           srcX0, srcY0, srcX1, srcY1,
-                           dstX0, dstY0, dstX1, dstY1,
-                           mask, filter);
-}
-
-/**
  * Does the renderbuffer have hiz enabled?
  */
 bool
 intel_renderbuffer_has_hiz(struct intel_renderbuffer *irb)
 {
    return intel_miptree_level_has_hiz(irb->mt, irb->mt_level);
-}
-
-bool
-intel_renderbuffer_resolve_hiz(struct brw_context *brw,
-			       struct intel_renderbuffer *irb)
-{
-   if (irb->mt)
-      return intel_miptree_slice_resolve_hiz(brw,
-                                             irb->mt,
-                                             irb->mt_level,
-                                             irb->mt_layer);
-
-   return false;
-}
-
-void
-intel_renderbuffer_att_set_needs_depth_resolve(struct gl_renderbuffer_attachment *att)
-{
-   struct intel_renderbuffer *irb = intel_renderbuffer(att->Renderbuffer);
-   if (irb->mt) {
-      if (att->Layered) {
-         intel_miptree_set_all_slices_need_depth_resolve(irb->mt, irb->mt_level);
-      } else {
-         intel_miptree_slice_set_needs_depth_resolve(irb->mt,
-                                                     irb->mt_level,
-                                                     irb->mt_layer);
-      }
-   }
-}
-
-bool
-intel_renderbuffer_resolve_depth(struct brw_context *brw,
-				 struct intel_renderbuffer *irb)
-{
-   if (irb->mt)
-      return intel_miptree_slice_resolve_depth(brw,
-                                               irb->mt,
-                                               irb->mt_level,
-                                               irb->mt_layer);
-
-   return false;
 }
 
 void
@@ -1037,7 +982,7 @@ brw_render_cache_set_clear(struct brw_context *brw)
 }
 
 void
-brw_render_cache_set_add_bo(struct brw_context *brw, drm_intel_bo *bo)
+brw_render_cache_set_add_bo(struct brw_context *brw, struct brw_bo *bo)
 {
    _mesa_set_add(brw->render_cache, bo);
 }
@@ -1055,20 +1000,12 @@ brw_render_cache_set_add_bo(struct brw_context *brw, drm_intel_bo *bo)
  * different caches within a batchbuffer, it's all our responsibility.
  */
 void
-brw_render_cache_set_check_flush(struct brw_context *brw, drm_intel_bo *bo)
+brw_render_cache_set_check_flush(struct brw_context *brw, struct brw_bo *bo)
 {
    if (!_mesa_set_search(brw->render_cache, bo))
       return;
 
    if (brw->gen >= 6) {
-      if (brw->gen == 6) {
-         /* [Dev-SNB{W/A}]: Before a PIPE_CONTROL with Write Cache
-          * Flush Enable = 1, a PIPE_CONTROL with any non-zero
-          * post-sync-op is required.
-          */
-         brw_emit_post_sync_nonzero_flush(brw);
-      }
-
       brw_emit_pipe_control_flush(brw,
                                   PIPE_CONTROL_DEPTH_CACHE_FLUSH |
                                   PIPE_CONTROL_RENDER_TARGET_FLUSH |
@@ -1097,10 +1034,7 @@ intel_fbo_init(struct brw_context *brw)
    dd->UnmapRenderbuffer = intel_unmap_renderbuffer;
    dd->RenderTexture = intel_render_texture;
    dd->ValidateFramebuffer = intel_validate_framebuffer;
-   if (brw->gen >= 6)
-      dd->BlitFramebuffer = intel_blit_framebuffer;
-   else
-      dd->BlitFramebuffer = gen4_blit_framebuffer;
+   dd->BlitFramebuffer = intel_blit_framebuffer;
    dd->EGLImageTargetRenderbufferStorage =
       intel_image_target_renderbuffer_storage;
 

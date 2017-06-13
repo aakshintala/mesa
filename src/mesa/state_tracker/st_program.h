@@ -39,6 +39,7 @@
 #include "program/program.h"
 #include "pipe/p_state.h"
 #include "st_context.h"
+#include "st_texture.h"
 #include "st_glsl_to_tgsi.h"
 
 
@@ -46,7 +47,41 @@
 extern "C" {
 #endif
 
-#define ST_DOUBLE_ATTRIB_PLACEHOLDER 0xffffffff
+#define ST_DOUBLE_ATTRIB_PLACEHOLDER 0xff
+
+struct st_external_sampler_key
+{
+   GLuint lower_nv12;             /**< bitmask of 2 plane YUV samplers */
+   GLuint lower_iyuv;             /**< bitmask of 3 plane YUV samplers */
+};
+
+static inline struct st_external_sampler_key
+st_get_external_sampler_key(struct st_context *st, struct gl_program *prog)
+{
+   unsigned mask = prog->ExternalSamplersUsed;
+   struct st_external_sampler_key key;
+
+   memset(&key, 0, sizeof(key));
+
+   while (unlikely(mask)) {
+      unsigned unit = u_bit_scan(&mask);
+      struct st_texture_object *stObj =
+            st_get_texture_object(st->ctx, prog, unit);
+
+      switch (st_get_view_format(stObj)) {
+      case PIPE_FORMAT_NV12:
+         key.lower_nv12 |= (1 << unit);
+         break;
+      case PIPE_FORMAT_IYUV:
+         key.lower_iyuv |= (1 << unit);
+         break;
+      default:
+         break;
+      }
+   }
+
+   return key;
+}
 
 /** Fragment program variant key */
 struct st_fp_variant_key
@@ -72,6 +107,8 @@ struct st_fp_variant_key
 
    /** needed for ATI_fragment_shader */
    char texture_targets[MAX_NUM_FRAGMENT_REGISTERS_ATI];
+
+   struct st_external_sampler_key external;
 };
 
 
@@ -99,19 +136,23 @@ struct st_fp_variant
 
 
 /**
- * Derived from Mesa gl_fragment_program:
+ * Derived from Mesa gl_program:
  */
 struct st_fragment_program
 {
-   struct gl_fragment_program Base;
+   struct gl_program Base;
    struct pipe_shader_state tgsi;
    struct glsl_to_tgsi_visitor* glsl_to_tgsi;
    struct ati_fragment_shader *ati_fs;
+   uint64_t affected_states; /**< ST_NEW_* flags to mark dirty when binding */
 
    /* used when bypassing glsl_to_tgsi: */
    struct gl_shader_program *shader_program;
 
    struct st_fp_variant *variants;
+
+   /** SHA1 hash of linked tgsi shader program, used for on-disk cache */
+   unsigned char sha1[20];
 };
 
 
@@ -159,28 +200,32 @@ struct st_vp_variant
 
 
 /**
- * Derived from Mesa gl_fragment_program:
+ * Derived from Mesa gl_program:
  */
 struct st_vertex_program
 {
-   struct gl_vertex_program Base;  /**< The Mesa vertex program */
+   struct gl_program Base;  /**< The Mesa vertex program */
    struct pipe_shader_state tgsi;
    struct glsl_to_tgsi_visitor* glsl_to_tgsi;
+   uint64_t affected_states; /**< ST_NEW_* flags to mark dirty when binding */
 
    /* used when bypassing glsl_to_tgsi: */
    struct gl_shader_program *shader_program;
 
    /** maps a Mesa VERT_ATTRIB_x to a packed TGSI input index */
    /** maps a TGSI input index back to a Mesa VERT_ATTRIB_x */
-   GLuint index_to_input[PIPE_MAX_SHADER_INPUTS];
-   GLuint num_inputs;
+   ubyte index_to_input[PIPE_MAX_ATTRIBS];
+   ubyte num_inputs;
 
    /** Maps VARYING_SLOT_x to slot */
-   GLuint result_to_output[VARYING_SLOT_MAX];
+   ubyte result_to_output[VARYING_SLOT_MAX];
 
    /** List of translated variants of this vertex program.
     */
    struct st_vp_variant *variants;
+
+   /** SHA1 hash of linked tgsi shader program, used for on-disk cache */
+   unsigned char sha1[20];
 };
 
 
@@ -207,90 +252,63 @@ struct st_basic_variant
 
 
 /**
- * Derived from Mesa gl_geometry_program:
+ * Derived from Mesa gl_program:
  */
-struct st_geometry_program
+struct st_common_program
 {
-   struct gl_geometry_program Base;  /**< The Mesa geometry program */
+   struct gl_program Base;
    struct pipe_shader_state tgsi;
    struct glsl_to_tgsi_visitor* glsl_to_tgsi;
+   uint64_t affected_states; /**< ST_NEW_* flags to mark dirty when binding */
 
    struct st_basic_variant *variants;
+
+   /** SHA1 hash of linked tgsi shader program, used for on-disk cache */
+   unsigned char sha1[20];
 };
 
 
 /**
- * Derived from Mesa gl_tess_ctrl_program:
- */
-struct st_tessctrl_program
-{
-   struct gl_tess_ctrl_program Base;  /**< The Mesa tess ctrl program */
-   struct pipe_shader_state tgsi;
-   struct glsl_to_tgsi_visitor* glsl_to_tgsi;
-
-   struct st_basic_variant *variants;
-};
-
-
-/**
- * Derived from Mesa gl_tess_eval_program:
- */
-struct st_tesseval_program
-{
-   struct gl_tess_eval_program Base;  /**< The Mesa tess eval program */
-   struct pipe_shader_state tgsi;
-   struct glsl_to_tgsi_visitor* glsl_to_tgsi;
-
-   struct st_basic_variant *variants;
-};
-
-
-/**
- * Derived from Mesa gl_compute_program:
+ * Derived from Mesa gl_program:
  */
 struct st_compute_program
 {
-   struct gl_compute_program Base;  /**< The Mesa compute program */
+   struct gl_program Base;  /**< The Mesa compute program */
    struct pipe_compute_state tgsi;
    struct glsl_to_tgsi_visitor* glsl_to_tgsi;
+   uint64_t affected_states; /**< ST_NEW_* flags to mark dirty when binding */
+
+   /* used when bypassing glsl_to_tgsi: */
+   struct gl_shader_program *shader_program;
 
    struct st_basic_variant *variants;
+
+   /** SHA1 hash of linked tgsi shader program, used for on-disk cache */
+   unsigned char sha1[20];
 };
 
 
 static inline struct st_fragment_program *
-st_fragment_program( struct gl_fragment_program *fp )
+st_fragment_program( struct gl_program *fp )
 {
    return (struct st_fragment_program *)fp;
 }
 
 
 static inline struct st_vertex_program *
-st_vertex_program( struct gl_vertex_program *vp )
+st_vertex_program( struct gl_program *vp )
 {
    return (struct st_vertex_program *)vp;
 }
 
-static inline struct st_geometry_program *
-st_geometry_program( struct gl_geometry_program *gp )
+static inline struct st_common_program *
+st_common_program( struct gl_program *gp )
 {
-   return (struct st_geometry_program *)gp;
-}
-
-static inline struct st_tessctrl_program *
-st_tessctrl_program( struct gl_tess_ctrl_program *tcp )
-{
-   return (struct st_tessctrl_program *)tcp;
-}
-
-static inline struct st_tesseval_program *
-st_tesseval_program( struct gl_tess_eval_program *tep )
-{
-   return (struct st_tesseval_program *)tep;
+   return (struct st_common_program *)gp;
 }
 
 static inline struct st_compute_program *
-st_compute_program( struct gl_compute_program *cp )
+st_compute_program( struct gl_program *cp )
 {
    return (struct st_compute_program *)cp;
 }
@@ -299,16 +317,6 @@ static inline void
 st_reference_vertprog(struct st_context *st,
                       struct st_vertex_program **ptr,
                       struct st_vertex_program *prog)
-{
-   _mesa_reference_program(st->ctx,
-                           (struct gl_program **) ptr,
-                           (struct gl_program *) prog);
-}
-
-static inline void
-st_reference_geomprog(struct st_context *st,
-                      struct st_geometry_program **ptr,
-                      struct st_geometry_program *prog)
 {
    _mesa_reference_program(st->ctx,
                            (struct gl_program **) ptr,
@@ -326,19 +334,9 @@ st_reference_fragprog(struct st_context *st,
 }
 
 static inline void
-st_reference_tesscprog(struct st_context *st,
-                       struct st_tessctrl_program **ptr,
-                       struct st_tessctrl_program *prog)
-{
-   _mesa_reference_program(st->ctx,
-                           (struct gl_program **) ptr,
-                           (struct gl_program *) prog);
-}
-
-static inline void
-st_reference_tesseprog(struct st_context *st,
-                       struct st_tesseval_program **ptr,
-                       struct st_tesseval_program *prog)
+st_reference_prog(struct st_context *st,
+                  struct st_common_program **ptr,
+                  struct st_common_program *prog)
 {
    _mesa_reference_program(st->ctx,
                            (struct gl_program **) ptr,
@@ -380,6 +378,8 @@ st_get_generic_varying_index(struct st_context *st, GLuint attr)
    return 0;
 }
 
+extern void
+st_set_prog_affected_state_flags(struct gl_program *prog);
 
 extern struct st_vp_variant *
 st_get_vp_variant(struct st_context *st,
@@ -433,15 +433,15 @@ st_translate_fragment_program(struct st_context *st,
 
 extern bool
 st_translate_geometry_program(struct st_context *st,
-                              struct st_geometry_program *stgp);
+                              struct st_common_program *stgp);
 
 extern bool
 st_translate_tessctrl_program(struct st_context *st,
-                              struct st_tessctrl_program *sttcp);
+                              struct st_common_program *sttcp);
 
 extern bool
 st_translate_tesseval_program(struct st_context *st,
-                              struct st_tesseval_program *sttep);
+                              struct st_common_program *sttep);
 
 extern bool
 st_translate_compute_program(struct st_context *st,

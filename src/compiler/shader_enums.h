@@ -39,6 +39,7 @@ extern "C" {
  */
 typedef enum
 {
+   MESA_SHADER_NONE = -1,
    MESA_SHADER_VERTEX = 0,
    MESA_SHADER_TESS_CTRL = 1,
    MESA_SHADER_TESS_EVAL = 2,
@@ -172,6 +173,7 @@ const char *gl_vert_attrib_name(gl_vert_attrib attrib);
    BITFIELD64_RANGE(VERT_ATTRIB_GENERIC(0), VERT_ATTRIB_GENERIC_MAX)
 /*@}*/
 
+#define MAX_VARYING 32 /**< number of float[4] vectors */
 
 /**
  * Indexes for vertex shader outputs, geometry shader inputs/outputs, and
@@ -214,6 +216,9 @@ typedef enum
    VARYING_SLOT_PNTC, /* FS only */
    VARYING_SLOT_TESS_LEVEL_OUTER, /* Only appears as TCS output. */
    VARYING_SLOT_TESS_LEVEL_INNER, /* Only appears as TCS output. */
+   VARYING_SLOT_BOUNDING_BOX0, /* Only appears as TCS output. */
+   VARYING_SLOT_BOUNDING_BOX1, /* Only appears as TCS output. */
+   VARYING_SLOT_VIEW_INDEX,
    VARYING_SLOT_VAR0, /* First generic varying slot */
    /* the remaining are simply for the benefit of gl_varying_slot_name()
     * and not to be construed as an upper bound:
@@ -294,6 +299,8 @@ const char *gl_varying_slot_name(gl_varying_slot slot);
 #define VARYING_BIT_PNTC BITFIELD64_BIT(VARYING_SLOT_PNTC)
 #define VARYING_BIT_TESS_LEVEL_OUTER BITFIELD64_BIT(VARYING_SLOT_TESS_LEVEL_OUTER)
 #define VARYING_BIT_TESS_LEVEL_INNER BITFIELD64_BIT(VARYING_SLOT_TESS_LEVEL_INNER)
+#define VARYING_BIT_BOUNDING_BOX0 BITFIELD64_BIT(VARYING_SLOT_BOUNDING_BOX0)
+#define VARYING_BIT_BOUNDING_BOX1 BITFIELD64_BIT(VARYING_SLOT_BOUNDING_BOX1)
 #define VARYING_BIT_VAR(V) BITFIELD64_BIT(VARYING_SLOT_VAR0 + (V))
 /*@}*/
 
@@ -312,6 +319,65 @@ const char *gl_varying_slot_name(gl_varying_slot slot);
  */
 typedef enum
 {
+   /**
+    * \name System values applicable to all shaders
+    */
+   /*@{*/
+
+   /**
+    * Builtin variables added by GL_ARB_shader_ballot.
+    */
+   /*@{*/
+
+   /**
+    * From the GL_ARB_shader-ballot spec:
+    *
+    *    "A sub-group is a collection of invocations which execute in lockstep.
+    *     The variable <gl_SubGroupSizeARB> is the maximum number of
+    *     invocations in a sub-group. The maximum <gl_SubGroupSizeARB>
+    *     supported in this extension is 64."
+    *
+    * The spec defines this as a uniform. However, it's highly unlikely that
+    * implementations actually treat it as a uniform (which is loaded from a
+    * constant buffer). Most likely, this is an implementation-wide constant,
+    * or perhaps something that depends on the shader stage.
+    */
+   SYSTEM_VALUE_SUBGROUP_SIZE,
+
+   /**
+    * From the GL_ARB_shader_ballot spec:
+    *
+    *    "The variable <gl_SubGroupInvocationARB> holds the index of the
+    *     invocation within sub-group. This variable is in the range 0 to
+    *     <gl_SubGroupSizeARB>-1, where <gl_SubGroupSizeARB> is the total
+    *     number of invocations in a sub-group."
+    */
+   SYSTEM_VALUE_SUBGROUP_INVOCATION,
+
+   /**
+    * From the GL_ARB_shader_ballot spec:
+    *
+    *    "The <gl_SubGroup??MaskARB> variables provide a bitmask for all
+    *     invocations, with one bit per invocation starting with the least
+    *     significant bit, according to the following table,
+    *
+    *       variable               equation for bit values
+    *       --------------------   ------------------------------------
+    *       gl_SubGroupEqMaskARB   bit index == gl_SubGroupInvocationARB
+    *       gl_SubGroupGeMaskARB   bit index >= gl_SubGroupInvocationARB
+    *       gl_SubGroupGtMaskARB   bit index >  gl_SubGroupInvocationARB
+    *       gl_SubGroupLeMaskARB   bit index <= gl_SubGroupInvocationARB
+    *       gl_SubGroupLtMaskARB   bit index <  gl_SubGroupInvocationARB
+    */
+   SYSTEM_VALUE_SUBGROUP_EQ_MASK,
+   SYSTEM_VALUE_SUBGROUP_GE_MASK,
+   SYSTEM_VALUE_SUBGROUP_GT_MASK,
+   SYSTEM_VALUE_SUBGROUP_LE_MASK,
+   SYSTEM_VALUE_SUBGROUP_LT_MASK,
+   /*@}*/
+
+   /*@}*/
+
    /**
     * \name Vertex shader system values
     */
@@ -468,7 +534,11 @@ typedef enum
    SYSTEM_VALUE_GLOBAL_INVOCATION_ID,
    SYSTEM_VALUE_WORK_GROUP_ID,
    SYSTEM_VALUE_NUM_WORK_GROUPS,
+   SYSTEM_VALUE_LOCAL_GROUP_SIZE,
    /*@}*/
+
+   /** Required for VK_KHX_multiview */
+   SYSTEM_VALUE_VIEW_INDEX,
 
    /**
     * Driver internal vertex-count, used (for example) for drivers to
@@ -485,19 +555,19 @@ const char *gl_system_value_name(gl_system_value sysval);
  * The possible interpolation qualifiers that can be applied to a fragment
  * shader input in GLSL.
  *
- * Note: INTERP_QUALIFIER_NONE must be 0 so that memsetting the
- * gl_fragment_program data structure to 0 causes the default behavior.
+ * Note: INTERP_MODE_NONE must be 0 so that memsetting the
+ * ir_variable data structure to 0 causes the default behavior.
  */
-enum glsl_interp_qualifier
+enum glsl_interp_mode
 {
-   INTERP_QUALIFIER_NONE = 0,
-   INTERP_QUALIFIER_SMOOTH,
-   INTERP_QUALIFIER_FLAT,
-   INTERP_QUALIFIER_NOPERSPECTIVE,
-   INTERP_QUALIFIER_COUNT /**< Number of interpolation qualifiers */
+   INTERP_MODE_NONE = 0,
+   INTERP_MODE_SMOOTH,
+   INTERP_MODE_FLAT,
+   INTERP_MODE_NOPERSPECTIVE,
+   INTERP_MODE_COUNT /**< Number of interpolation qualifiers */
 };
 
-const char *glsl_interp_qualifier_name(enum glsl_interp_qualifier qual);
+const char *glsl_interp_mode_name(enum glsl_interp_mode qual);
 
 /**
  * Fragment program results
@@ -557,6 +627,40 @@ enum gl_buffer_access_qualifier
    ACCESS_COHERENT = 1,
    ACCESS_RESTRICT = 2,
    ACCESS_VOLATILE = 4,
+};
+
+/**
+ * \brief Blend support qualifiers
+ */
+enum gl_advanced_blend_mode
+{
+   BLEND_NONE           = 0x0000,
+
+   BLEND_MULTIPLY       = 0x0001,
+   BLEND_SCREEN         = 0x0002,
+   BLEND_OVERLAY        = 0x0004,
+   BLEND_DARKEN         = 0x0008,
+   BLEND_LIGHTEN        = 0x0010,
+   BLEND_COLORDODGE     = 0x0020,
+   BLEND_COLORBURN      = 0x0040,
+   BLEND_HARDLIGHT      = 0x0080,
+   BLEND_SOFTLIGHT      = 0x0100,
+   BLEND_DIFFERENCE     = 0x0200,
+   BLEND_EXCLUSION      = 0x0400,
+   BLEND_HSL_HUE        = 0x0800,
+   BLEND_HSL_SATURATION = 0x1000,
+   BLEND_HSL_COLOR      = 0x2000,
+   BLEND_HSL_LUMINOSITY = 0x4000,
+
+   BLEND_ALL            = 0x7fff,
+};
+
+enum gl_tess_spacing
+{
+   TESS_SPACING_UNSPECIFIED,
+   TESS_SPACING_EQUAL,
+   TESS_SPACING_FRACTIONAL_ODD,
+   TESS_SPACING_FRACTIONAL_EVEN,
 };
 
 #ifdef __cplusplus

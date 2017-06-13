@@ -26,7 +26,7 @@ static const struct drm_conf_ret throttle_ret = {
 
 static const struct drm_conf_ret share_fd_ret = {
    .type = DRM_CONF_BOOL,
-   .val.val_int = true,
+   .val.val_bool = true,
 };
 
 static const struct drm_conf_ret *drm_configuration(enum drm_conf conf)
@@ -43,4 +43,4 @@ static const struct drm_conf_ret *drm_configuration(enum drm_conf conf)
 }
 
 PUBLIC
-DRM_DRIVER_DESCRIPTOR("radeonsi", "radeon", create_screen, drm_configuration)
+DRM_DRIVER_DESCRIPTOR("radeonsi", create_screen, drm_configuration)

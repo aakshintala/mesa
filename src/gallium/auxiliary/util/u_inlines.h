@@ -136,8 +136,10 @@ pipe_resource_reference(struct pipe_resource **ptr, struct pipe_resource *tex)
    struct pipe_resource *old_tex = *ptr;
 
    if (pipe_reference_described(&(*ptr)->reference, &tex->reference, 
-                                (debug_reference_descriptor)debug_describe_resource))
+                                (debug_reference_descriptor)debug_describe_resource)) {
+      pipe_resource_reference(&old_tex->next, NULL);
       old_tex->screen->resource_destroy(old_tex->screen, old_tex);
+   }
    *ptr = tex;
 }
 
@@ -183,6 +185,25 @@ pipe_so_target_reference(struct pipe_stream_output_target **ptr,
                      (debug_reference_descriptor)debug_describe_so_target))
       old->context->stream_output_target_destroy(old->context, old);
    *ptr = target;
+}
+
+static inline void
+pipe_vertex_buffer_unreference(struct pipe_vertex_buffer *dst)
+{
+   if (dst->is_user_buffer)
+      dst->buffer.user = NULL;
+   else
+      pipe_resource_reference(&dst->buffer.resource, NULL);
+}
+
+static inline void
+pipe_vertex_buffer_reference(struct pipe_vertex_buffer *dst,
+                             const struct pipe_vertex_buffer *src)
+{
+   pipe_vertex_buffer_unreference(dst);
+   if (!src->is_user_buffer)
+      pipe_resource_reference(&dst->buffer.resource, src->buffer.resource);
+   memcpy(dst, src, sizeof(*src));
 }
 
 static inline void
@@ -339,25 +360,8 @@ pipe_buffer_write(struct pipe_context *pipe,
                   unsigned size,
                   const void *data)
 {
-   struct pipe_box box;
-   unsigned access = PIPE_TRANSFER_WRITE;
-
-   if (offset == 0 && size == buf->width0) {
-      access |= PIPE_TRANSFER_DISCARD_WHOLE_RESOURCE;
-   } else {
-      access |= PIPE_TRANSFER_DISCARD_RANGE;
-   }
-
-   u_box_1d(offset, size, &box);
-
-   pipe->transfer_inline_write( pipe,
-                                buf,
-                                0,
-                                access,
-                                &box,
-                                data,
-                                size,
-                                0);
+   /* Don't set any other usage bits. Drivers should derive them. */
+   pipe->buffer_subdata(pipe, buf, PIPE_TRANSFER_WRITE, offset, size, data);
 }
 
 /**
@@ -372,18 +376,10 @@ pipe_buffer_write_nooverlap(struct pipe_context *pipe,
                             unsigned offset, unsigned size,
                             const void *data)
 {
-   struct pipe_box box;
-
-   u_box_1d(offset, size, &box);
-
-   pipe->transfer_inline_write(pipe,
-                               buf,
-                               0,
-                               (PIPE_TRANSFER_WRITE |
-                                PIPE_TRANSFER_UNSYNCHRONIZED),
-                               &box,
-                               data,
-                               0, 0);
+   pipe->buffer_subdata(pipe, buf,
+                        (PIPE_TRANSFER_WRITE |
+                         PIPE_TRANSFER_UNSYNCHRONIZED),
+                        offset, size, data);
 }
 
 
@@ -481,7 +477,8 @@ pipe_transfer_unmap( struct pipe_context *context,
 }
 
 static inline void
-pipe_set_constant_buffer(struct pipe_context *pipe, uint shader, uint index,
+pipe_set_constant_buffer(struct pipe_context *pipe,
+                         enum pipe_shader_type shader, uint index,
                          struct pipe_resource *buf)
 {
    if (buf) {

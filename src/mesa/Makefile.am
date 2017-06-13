@@ -33,9 +33,6 @@ if HAVE_OSMESA
 SUBDIRS += drivers/osmesa
 endif
 
-gldir = $(includedir)/GL
-gl_HEADERS = $(top_srcdir)/include/GL/*.h
-
 include Makefile.sources
 
 EXTRA_DIST = \
@@ -99,6 +96,7 @@ endif
 
 AM_CPPFLAGS = $(DEFINES) $(INCLUDE_DIRS)
 AM_CFLAGS = \
+	$(VDPAU_CFLAGS) \
 	$(LLVM_CFLAGS) \
 	$(VISIBILITY_CFLAGS) \
 	$(MSVC2013_COMPAT_CFLAGS)
@@ -158,9 +156,6 @@ libmesa_sse41_la_SOURCES = \
 	$(X86_SSE41_FILES)
 
 libmesa_sse41_la_CFLAGS = $(AM_CFLAGS) $(SSE41_CFLAGS)
-
-pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = gl.pc
 
 MKDIR_GEN = $(AM_V_at)$(MKDIR_P) $(@D)
 YACC_GEN = $(AM_V_GEN)$(YACC) $(YFLAGS)

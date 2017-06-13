@@ -30,6 +30,7 @@
 #include "mtypes.h"
 #include "formats.h"
 #include "errors.h"
+#include "hash.h"
 #include "context.h"
 #include "texobj.h"
 #include "teximage.h"
@@ -401,7 +402,7 @@ _mesa_is_shader_image_format_supported(const struct gl_context *ctx,
 
    /* Formats supported on unextended desktop GL and the original
     * ARB_shader_image_load_store extension, c.f. table 3.21 of the OpenGL 4.2
-    * specification.
+    * specification or by GLES 3.1 with GL_NV_image_formats extension.
     */
    case GL_RG32F:
    case GL_RG16F:
@@ -418,17 +419,27 @@ _mesa_is_shader_image_format_supported(const struct gl_context *ctx,
    case GL_RG8I:
    case GL_R16I:
    case GL_R8I:
-   case GL_RGBA16:
    case GL_RGB10_A2:
-   case GL_RG16:
    case GL_RG8:
-   case GL_R16:
    case GL_R8:
-   case GL_RGBA16_SNORM:
-   case GL_RG16_SNORM:
    case GL_RG8_SNORM:
-   case GL_R16_SNORM:
    case GL_R8_SNORM:
+      return true;
+
+   /* Formats supported on unextended desktop GL and the original
+    * ARB_shader_image_load_store extension, c.f. table 3.21 of the OpenGL 4.2
+    * specification.
+    *
+    * These can be supported by GLES 3.1 with GL_NV_image_formats &
+    * GL_EXT_texture_norm16 extensions but we don't have support for the
+    * latter in Mesa yet.
+    */
+   case GL_RGBA16:
+   case GL_RGBA16_SNORM:
+   case GL_RG16:
+   case GL_RG16_SNORM:
+   case GL_R16:
+   case GL_R16_SNORM:
       return _mesa_is_desktop_gl(ctx);
 
    default:
@@ -518,8 +529,8 @@ _mesa_is_image_unit_valid(struct gl_context *ctx, struct gl_image_unit *u)
 
 static GLboolean
 validate_bind_image_texture(struct gl_context *ctx, GLuint unit,
-                            GLuint texture, GLint level, GLboolean layered,
-                            GLint layer, GLenum access, GLenum format)
+                            GLuint texture, GLint level, GLint layer,
+                            GLenum access, GLenum format)
 {
    assert(ctx->Const.MaxImageUnits <= MAX_IMAGE_UNITS);
 
@@ -553,27 +564,75 @@ validate_bind_image_texture(struct gl_context *ctx, GLuint unit,
    return GL_TRUE;
 }
 
-void GLAPIENTRY
-_mesa_BindImageTexture(GLuint unit, GLuint texture, GLint level,
-                       GLboolean layered, GLint layer, GLenum access,
-                       GLenum format)
+static void
+set_image_binding(struct gl_image_unit *u, struct gl_texture_object *texObj,
+                  GLint level, GLboolean layered, GLint layer, GLenum access,
+                  GLenum format)
 {
-   GET_CURRENT_CONTEXT(ctx);
-   struct gl_image_unit *u;
+   u->Level = level;
+   u->Access = access;
+   u->Format = format;
+   u->_ActualFormat = _mesa_get_shader_image_format(format);
 
-   if (!validate_bind_image_texture(ctx, unit, texture, level,
-                                    layered, layer, access, format))
-      return;
+   if (texObj && _mesa_tex_target_is_layered(texObj->Target)) {
+      u->Layered = layered;
+      u->Layer = layer;
+      u->_Layer = (u->Layered ? 0 : u->Layer);
+   } else {
+      u->Layered = GL_FALSE;
+      u->Layer = 0;
+   }
+
+   _mesa_reference_texobj(&u->TexObj, texObj);
+}
+
+static void
+bind_image_texture(struct gl_context *ctx, struct gl_texture_object *texObj,
+                   GLuint unit, GLint level, GLboolean layered, GLint layer,
+                   GLenum access, GLenum format)
+{
+   struct gl_image_unit *u;
 
    u = &ctx->ImageUnits[unit];
 
    FLUSH_VERTICES(ctx, 0);
    ctx->NewDriverState |= ctx->DriverFlags.NewImageUnits;
 
-   if (texture) {
-      struct gl_texture_object *t = _mesa_lookup_texture(ctx, texture);
+   set_image_binding(u, texObj, level, layered, layer, access, format);
+}
 
-      if (!t) {
+void GLAPIENTRY
+_mesa_BindImageTexture_no_error(GLuint unit, GLuint texture, GLint level,
+                                GLboolean layered, GLint layer, GLenum access,
+                                GLenum format)
+{
+   struct gl_texture_object *texObj = NULL;
+
+   GET_CURRENT_CONTEXT(ctx);
+
+   if (texture)
+      texObj = _mesa_lookup_texture(ctx, texture);
+
+   bind_image_texture(ctx, texObj, unit, level, layered, layer, access, format);
+}
+
+void GLAPIENTRY
+_mesa_BindImageTexture(GLuint unit, GLuint texture, GLint level,
+                       GLboolean layered, GLint layer, GLenum access,
+                       GLenum format)
+{
+   struct gl_texture_object *texObj = NULL;
+
+   GET_CURRENT_CONTEXT(ctx);
+
+   if (!validate_bind_image_texture(ctx, unit, texture, level, layer, access,
+                                    format))
+      return;
+
+   if (texture) {
+      texObj = _mesa_lookup_texture(ctx, texture);
+
+      if (!texObj) {
          _mesa_error(ctx, GL_INVALID_VALUE, "glBindImageTexture(texture)");
          return;
       }
@@ -588,57 +647,22 @@ _mesa_BindImageTexture(GLuint unit, GLuint texture, GLint level,
        * recognizes that there is no way to create immutable buffer textures,
        * so those are excluded from this requirement.
        */
-      if (_mesa_is_gles(ctx) && !t->Immutable &&
-          t->Target != GL_TEXTURE_BUFFER) {
+      if (_mesa_is_gles(ctx) && !texObj->Immutable &&
+          texObj->Target != GL_TEXTURE_BUFFER) {
          _mesa_error(ctx, GL_INVALID_OPERATION,
                      "glBindImageTexture(!immutable)");
          return;
       }
-
-      _mesa_reference_texobj(&u->TexObj, t);
-   } else {
-      _mesa_reference_texobj(&u->TexObj, NULL);
    }
 
-   u->Level = level;
-   u->Access = access;
-   u->Format = format;
-   u->_ActualFormat = _mesa_get_shader_image_format(format);
-
-   if (u->TexObj && _mesa_tex_target_is_layered(u->TexObj->Target)) {
-      u->Layered = layered;
-      u->Layer = layer;
-      u->_Layer = (u->Layered ? 0 : u->Layer);
-   } else {
-      u->Layered = GL_FALSE;
-      u->Layer = 0;
-   }
+   bind_image_texture(ctx, texObj, unit, level, layered, layer, access, format);
 }
 
-void GLAPIENTRY
-_mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
+static ALWAYS_INLINE void
+bind_image_textures(struct gl_context *ctx, GLuint first, GLuint count,
+                    const GLuint *textures, bool no_error)
 {
-   GET_CURRENT_CONTEXT(ctx);
    int i;
-
-   if (!ctx->Extensions.ARB_shader_image_load_store) {
-      _mesa_error(ctx, GL_INVALID_OPERATION, "glBindImageTextures()");
-      return;
-   }
-
-   if (first + count > ctx->Const.MaxImageUnits) {
-      /* The ARB_multi_bind spec says:
-       *
-       *    "An INVALID_OPERATION error is generated if <first> + <count>
-       *     is greater than the number of image units supported by
-       *     the implementation."
-       */
-      _mesa_error(ctx, GL_INVALID_OPERATION,
-                  "glBindImageTextures(first=%u + count=%d > the value of "
-                  "GL_MAX_IMAGE_UNITS=%u)",
-                  first, count, ctx->Const.MaxImageUnits);
-      return;
-   }
 
    /* Assume that at least one binding will be changed */
    FLUSH_VERTICES(ctx, 0);
@@ -663,19 +687,19 @@ _mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
     *       their parameters are valid and no other error occurs."
     */
 
-   _mesa_begin_texture_lookups(ctx);
+   _mesa_HashLockMutex(ctx->Shared->TexObjects);
 
    for (i = 0; i < count; i++) {
       struct gl_image_unit *u = &ctx->ImageUnits[first + i];
       const GLuint texture = textures ? textures[i] : 0;
 
-      if (texture != 0) {
-         struct gl_texture_object *texObj;
+      if (texture) {
+         struct gl_texture_object *texObj = u->TexObj;
          GLenum tex_format;
 
-         if (!u->TexObj || u->TexObj->Name != texture) {
+         if (!texObj || texObj->Name != texture) {
             texObj = _mesa_lookup_texture_locked(ctx, texture);
-            if (!texObj) {
+            if (!no_error && !texObj) {
                /* The ARB_multi_bind spec says:
                 *
                 *    "An INVALID_OPERATION error is generated if any value
@@ -688,8 +712,6 @@ _mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
                            "object)", i, texture);
                continue;
             }
-         } else {
-            texObj = u->TexObj;
          }
 
          if (texObj->Target == GL_TEXTURE_BUFFER) {
@@ -697,8 +719,8 @@ _mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
          } else {
             struct gl_texture_image *image = texObj->Image[0][0];
 
-            if (!image || image->Width == 0 || image->Height == 0 ||
-                image->Depth == 0) {
+            if (!no_error && (!image || image->Width == 0 ||
+                              image->Height == 0 || image->Depth == 0)) {
                /* The ARB_multi_bind spec says:
                 *
                 *    "An INVALID_OPERATION error is generated if the width,
@@ -715,7 +737,8 @@ _mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
             tex_format = image->InternalFormat;
          }
 
-         if (!_mesa_is_shader_image_format_supported(ctx, tex_format)) {
+         if (!no_error &&
+             !_mesa_is_shader_image_format_supported(ctx, tex_format)) {
             /* The ARB_multi_bind spec says:
              *
              *   "An INVALID_OPERATION error is generated if the internal
@@ -732,75 +755,50 @@ _mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
          }
 
          /* Update the texture binding */
-         _mesa_reference_texobj(&u->TexObj, texObj);
-         u->Level = 0;
-         u->Layered = _mesa_tex_target_is_layered(texObj->Target);
-         u->_Layer = u->Layer = 0;
-         u->Access = GL_READ_WRITE;
-         u->Format = tex_format;
-         u->_ActualFormat = _mesa_get_shader_image_format(tex_format);
+         set_image_binding(u, texObj, 0,
+                           _mesa_tex_target_is_layered(texObj->Target),
+                           0, GL_READ_WRITE, tex_format);
       } else {
          /* Unbind the texture from the unit */
-         _mesa_reference_texobj(&u->TexObj, NULL);
-         u->Level = 0;
-         u->Layered = GL_FALSE;
-         u->_Layer = u->Layer = 0;
-         u->Access = GL_READ_ONLY;
-         u->Format = GL_R8;
-         u->_ActualFormat = MESA_FORMAT_R_UNORM8;
+         set_image_binding(u, NULL, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
       }
    }
 
-   _mesa_end_texture_lookups(ctx);
+   _mesa_HashUnlockMutex(ctx->Shared->TexObjects);
 }
 
 void GLAPIENTRY
-_mesa_MemoryBarrier(GLbitfield barriers)
+_mesa_BindImageTextures_no_error(GLuint first, GLsizei count,
+                                 const GLuint *textures)
 {
    GET_CURRENT_CONTEXT(ctx);
 
-   if (ctx->Driver.MemoryBarrier)
-      ctx->Driver.MemoryBarrier(ctx, barriers);
+   bind_image_textures(ctx, first, count, textures, true);
 }
 
 void GLAPIENTRY
-_mesa_MemoryBarrierByRegion(GLbitfield barriers)
+_mesa_BindImageTextures(GLuint first, GLsizei count, const GLuint *textures)
 {
    GET_CURRENT_CONTEXT(ctx);
 
-   GLbitfield all_allowed_bits = GL_ATOMIC_COUNTER_BARRIER_BIT |
-                                 GL_FRAMEBUFFER_BARRIER_BIT |
-                                 GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
-                                 GL_SHADER_STORAGE_BARRIER_BIT |
-                                 GL_TEXTURE_FETCH_BARRIER_BIT |
-                                 GL_UNIFORM_BARRIER_BIT;
-
-   if (ctx->Driver.MemoryBarrier) {
-      /* From section 7.11.2 of the OpenGL ES 3.1 specification:
-       *
-       *    "When barriers is ALL_BARRIER_BITS, shader memory accesses will be
-       *     synchronized relative to all these barrier bits, but not to other
-       *     barrier bits specific to MemoryBarrier."
-       *
-       * That is, if barriers is the special value GL_ALL_BARRIER_BITS, then all
-       * barriers allowed by glMemoryBarrierByRegion should be activated."
-       */
-      if (barriers == GL_ALL_BARRIER_BITS) {
-         ctx->Driver.MemoryBarrier(ctx, all_allowed_bits);
-         return;
-      }
-
-      /* From section 7.11.2 of the OpenGL ES 3.1 specification:
-       *
-       *    "An INVALID_VALUE error is generated if barriers is not the special
-       *     value ALL_BARRIER_BITS, and has any bits set other than those
-       *     described above."
-       */
-      if ((barriers & ~all_allowed_bits) != 0) {
-         _mesa_error(ctx, GL_INVALID_VALUE,
-                     "glMemoryBarrierByRegion(unsupported barrier bit");
-      }
-
-      ctx->Driver.MemoryBarrier(ctx, barriers);
+   if (!ctx->Extensions.ARB_shader_image_load_store) {
+      _mesa_error(ctx, GL_INVALID_OPERATION, "glBindImageTextures()");
+      return;
    }
+
+   if (first + count > ctx->Const.MaxImageUnits) {
+      /* The ARB_multi_bind spec says:
+       *
+       *    "An INVALID_OPERATION error is generated if <first> + <count>
+       *     is greater than the number of image units supported by
+       *     the implementation."
+       */
+      _mesa_error(ctx, GL_INVALID_OPERATION,
+                  "glBindImageTextures(first=%u + count=%d > the value of "
+                  "GL_MAX_IMAGE_UNITS=%u)",
+                  first, count, ctx->Const.MaxImageUnits);
+      return;
+   }
+
+   bind_image_textures(ctx, first, count, textures, false);
 }

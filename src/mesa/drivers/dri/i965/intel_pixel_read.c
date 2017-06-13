@@ -82,9 +82,7 @@ intel_readpixels_tiled_memcpy(struct gl_context * ctx,
    int dst_pitch;
 
    /* The miptree's buffer. */
-   drm_intel_bo *bo;
-
-   int error = 0;
+   struct brw_bo *bo;
 
    uint32_t cpp;
    mem_copy_fn mem_copy = NULL;
@@ -109,22 +107,6 @@ intel_readpixels_tiled_memcpy(struct gl_context * ctx,
    /* Only a simple blit, no scale, bias or other mapping. */
    if (ctx->_ImageTransferState)
       return false;
-
-   /* This renderbuffer can come from a texture.  In this case, we impose
-    * some of the same restrictions we have for textures and adjust for
-    * miplevels.
-    */
-   if (rb->TexImage) {
-      if (rb->TexImage->TexObject->Target != GL_TEXTURE_2D &&
-          rb->TexImage->TexObject->Target != GL_TEXTURE_RECTANGLE)
-         return false;
-
-      int level = rb->TexImage->Level + rb->TexImage->TexObject->MinLevel;
-
-      /* Adjust x and y offset based on miplevel */
-      xoffset += irb->mt->level[level].level_x;
-      yoffset += irb->mt->level[level].level_y;
-   }
 
    /* It is possible that the renderbuffer (or underlying texture) is
     * multisampled.  Since ReadPixels from a multisampled buffer requires a
@@ -151,23 +133,37 @@ intel_readpixels_tiled_memcpy(struct gl_context * ctx,
       return false;
    }
 
+   /* tiled_to_linear() assumes that if the object is swizzled, it is using
+    * I915_BIT6_SWIZZLE_9_10 for X and I915_BIT6_SWIZZLE_9 for Y.  This is only
+    * true on gen5 and above.
+    *
+    * The killer on top is that some gen4 have an L-shaped swizzle mode, where
+    * parts of the memory aren't swizzled at all. Userspace just can't handle
+    * that.
+    */
+   if (brw->gen < 5 && brw->has_swizzling)
+      return false;
+
    /* Since we are going to read raw data to the miptree, we need to resolve
     * any pending fast color clears before we start.
     */
-   intel_miptree_resolve_color(brw, irb->mt, 0);
+   intel_miptree_access_raw(brw, irb->mt, irb->mt_level, irb->mt_layer, false);
 
    bo = irb->mt->bo;
 
-   if (drm_intel_bo_references(brw->batch.bo, bo)) {
+   if (brw_batch_references(&brw->batch, bo)) {
       perf_debug("Flushing before mapping a referenced bo.\n");
       intel_batchbuffer_flush(brw);
    }
 
-   error = brw_bo_map(brw, bo, false /* write enable */, "miptree");
-   if (error) {
+   void *map = brw_bo_map(brw, bo, MAP_READ | MAP_RAW);
+   if (map == NULL) {
       DBG("%s: failed to map bo\n", __func__);
       return false;
    }
+
+   xoffset += irb->mt->level[irb->mt_level].slice[irb->mt_layer].x_offset;
+   yoffset += irb->mt->level[irb->mt_level].slice[irb->mt_layer].y_offset;
 
    dst_pitch = _mesa_image_row_stride(pack, width, format, type);
 
@@ -201,14 +197,14 @@ intel_readpixels_tiled_memcpy(struct gl_context * ctx,
       xoffset * cpp, (xoffset + width) * cpp,
       yoffset, yoffset + height,
       pixels - (ptrdiff_t) yoffset * dst_pitch - (ptrdiff_t) xoffset * cpp,
-      bo->virtual,
+      map + irb->mt->offset,
       dst_pitch, irb->mt->pitch,
       brw->has_swizzling,
       irb->mt->tiling,
       mem_copy
    );
 
-   drm_intel_bo_unmap(bo);
+   brw_bo_unmap(bo);
    return true;
 }
 
@@ -255,16 +251,16 @@ intelReadPixels(struct gl_context * ctx,
       perf_debug("%s: fallback to CPU mapping in PBO case\n", __func__);
    }
 
-   ok = intel_readpixels_tiled_memcpy(ctx, x, y, width, height,
-                                      format, type, pixels, pack);
-   if(ok)
-      return;
-
-   /* glReadPixels() wont dirty the front buffer, so reset the dirty
+   /* Reading pixels wont dirty the front buffer, so reset the dirty
     * flag after calling intel_prepare_render(). */
    dirty = brw->front_buffer_dirty;
    intel_prepare_render(brw);
    brw->front_buffer_dirty = dirty;
+
+   ok = intel_readpixels_tiled_memcpy(ctx, x, y, width, height,
+                                      format, type, pixels, pack);
+   if(ok)
+      return;
 
    /* Update Mesa state before calling _mesa_readpixels().
     * XXX this may not be needed since ReadPixels no longer uses the

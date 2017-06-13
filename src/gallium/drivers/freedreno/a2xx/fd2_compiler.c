@@ -402,10 +402,10 @@ add_src_reg(struct fd2_compile_context *ctx, struct ir2_instruction *alu,
 	swiz[3] = swiz_vals[src->SwizzleW];
 	swiz[4] = '\0';
 
-	if ((ctx->need_sync & (uint64_t)(1 << num)) &&
+	if ((ctx->need_sync & ((uint64_t)1 << num)) &&
 			!(flags & IR2_REG_CONST)) {
 		alu->sync = true;
-		ctx->need_sync &= ~(uint64_t)(1 << num);
+		ctx->need_sync &= ~((uint64_t)1 << num);
 	}
 
 	return ir2_reg_create(alu, num, swiz, flags);
@@ -1079,11 +1079,6 @@ translate_instruction(struct fd2_compile_context *ctx,
 		break;
 	case TGSI_OPCODE_POW:
 		translate_pow(ctx, inst);
-		break;
-	case TGSI_OPCODE_ABS:
-		instr = ir2_instr_create_alu(cf, MAXv, ~0);
-		add_regs_vector_1(ctx, inst, instr);
-		instr->regs[1]->flags |= IR2_REG_NEGATE; /* src0 */
 		break;
 	case TGSI_OPCODE_COS:
 	case TGSI_OPCODE_SIN:

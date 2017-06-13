@@ -25,6 +25,7 @@
  *    Keith Whitwell <keithw@vmware.com>
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include "main/glheader.h"
 #include "main/bufferobj.h"
@@ -173,10 +174,11 @@ vbo_exec_bind_arrays( struct gl_context *ctx )
 {
    struct vbo_context *vbo = vbo_context(ctx);
    struct vbo_exec_context *exec = &vbo->exec;
-   struct gl_client_array *arrays = exec->vtx.arrays;
+   struct gl_vertex_array *arrays = exec->vtx.arrays;
    const GLuint *map;
    GLuint attr;
    GLbitfield64 varying_inputs = 0x0;
+   bool swap_pos = false;
 
    /* Install the default (ie Current) attributes first, then overlay
     * all active ones.
@@ -207,15 +209,18 @@ vbo_exec_bind_arrays( struct gl_context *ctx )
       /* check if VERT_ATTRIB_POS is not read but VERT_BIT_GENERIC0 is read.
        * In that case we effectively need to route the data from
        * glVertexAttrib(0, val) calls to feed into the GENERIC0 input.
+       * The original state gets essentially restored below.
        */
-      if ((ctx->VertexProgram._Current->Base.InputsRead & VERT_BIT_POS) == 0 &&
-          (ctx->VertexProgram._Current->Base.InputsRead & VERT_BIT_GENERIC0)) {
+      if ((ctx->VertexProgram._Current->info.inputs_read &
+           VERT_BIT_POS) == 0 &&
+          (ctx->VertexProgram._Current->info.inputs_read &
+           VERT_BIT_GENERIC0)) {
+         swap_pos = true;
          exec->vtx.inputs[VERT_ATTRIB_GENERIC0] = exec->vtx.inputs[0];
          exec->vtx.attrsz[VERT_ATTRIB_GENERIC0] = exec->vtx.attrsz[0];
+         exec->vtx.attrtype[VERT_ATTRIB_GENERIC0] = exec->vtx.attrtype[0];
          exec->vtx.attrptr[VERT_ATTRIB_GENERIC0] = exec->vtx.attrptr[0];
          exec->vtx.attrsz[0] = 0;
-         exec->vtx.enabled &= (~BITFIELD64_BIT(VBO_ATTRIB_POS));
-         exec->vtx.enabled |= BITFIELD64_BIT(VBO_ATTRIB_GENERIC0);
       }
       break;
    default:
@@ -247,12 +252,10 @@ vbo_exec_bind_arrays( struct gl_context *ctx )
          }
 	 arrays[attr].Size = exec->vtx.attrsz[src];
 	 arrays[attr].StrideB = exec->vtx.vertex_size * sizeof(GLfloat);
-	 arrays[attr].Stride = exec->vtx.vertex_size * sizeof(GLfloat);
 	 arrays[attr].Type = exec->vtx.attrtype[src];
 	 arrays[attr].Integer =
                vbo_attrtype_to_integer_flag(exec->vtx.attrtype[src]);
          arrays[attr].Format = GL_RGBA;
-	 arrays[attr].Enabled = 1;
          arrays[attr]._ElementSize = arrays[attr].Size * sizeof(GLfloat);
          _mesa_reference_buffer_object(ctx,
                                        &arrays[attr].BufferObj,
@@ -260,6 +263,16 @@ vbo_exec_bind_arrays( struct gl_context *ctx )
 
          varying_inputs |= VERT_BIT(attr);
       }
+   }
+
+   /* In case we swapped the position and generic0 attribute.
+    * Restore the original setting of the vtx.* variables.
+    * They are still needed with the original order and settings in case
+    * of a split primitive.
+    */
+   if (swap_pos) {
+      exec->vtx.attrsz[0] = exec->vtx.attrsz[VERT_ATTRIB_GENERIC0];
+      exec->vtx.attrsz[VERT_ATTRIB_GENERIC0] = 0;
    }
 
    _mesa_set_varying_vp_inputs( ctx, varying_inputs );
@@ -413,9 +426,7 @@ vbo_exec_vtx_flush(struct vbo_exec_context *exec, GLboolean keepUnmapped)
          if (ctx->NewState)
             _mesa_update_state( ctx );
 
-         if (_mesa_is_bufferobj(exec->vtx.bufferobj)) {
-            vbo_exec_vtx_unmap( exec );
-         }
+         vbo_exec_vtx_unmap(exec);
 
          if (0)
             printf("%s %d %d\n", __func__, exec->vtx.prim_count,
@@ -430,19 +441,15 @@ vbo_exec_vtx_flush(struct vbo_exec_context *exec, GLboolean keepUnmapped)
 				       exec->vtx.vert_count - 1,
 				       NULL, 0, NULL);
 
-	 /* If using a real VBO, get new storage -- unless asked not to.
-          */
-         if (_mesa_is_bufferobj(exec->vtx.bufferobj) && !keepUnmapped) {
+         /* Get new storage -- unless asked not to. */
+         if (!keepUnmapped)
             vbo_exec_vtx_map( exec );
-         }
       }
    }
 
    /* May have to unmap explicitly if we didn't draw:
     */
-   if (keepUnmapped &&
-       _mesa_is_bufferobj(exec->vtx.bufferobj) &&
-       exec->vtx.buffer_map) {
+   if (keepUnmapped && exec->vtx.buffer_map) {
       vbo_exec_vtx_unmap( exec );
    }
 

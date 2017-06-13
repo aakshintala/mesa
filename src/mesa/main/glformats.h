@@ -61,6 +61,9 @@ extern GLboolean
 _mesa_is_astc_format(GLenum internalFormat);
 
 extern GLboolean
+_mesa_is_etc2_format(GLenum internalFormat);
+
+extern GLboolean
 _mesa_is_type_unsigned(GLenum type);
 
 extern GLboolean
@@ -145,11 +148,16 @@ _mesa_base_tex_format(const struct gl_context *ctx, GLint internalFormat );
 extern uint32_t
 _mesa_format_from_format_and_type(GLenum format, GLenum type);
 
+extern uint32_t
+_mesa_tex_format_from_format_and_type(const struct gl_context *ctx,
+                                      GLenum gl_format, GLenum type);
+
 extern bool
 _mesa_is_es3_color_renderable(GLenum internal_format);
 
 extern bool
-_mesa_is_es3_texture_filterable(GLenum internal_format);
+_mesa_is_es3_texture_filterable(const struct gl_context *ctx,
+                                GLenum internal_format);
 
 #ifdef __cplusplus
 }

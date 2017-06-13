@@ -21,16 +21,18 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-
 /**
  * \file ir_optimization.h
  *
  * Prototypes for optimization passes to be called by the compiler and drivers.
  */
 
+#ifndef GLSL_IR_OPTIMIZATION_H
+#define GLSL_IR_OPTIMIZATION_H
+
 /* Operations for lower_instructions() */
 #define SUB_TO_ADD_NEG     0x01
-#define DIV_TO_MUL_RCP     0x02
+#define FDIV_TO_MUL_RCP    0x02
 #define EXP_TO_EXP2        0x04
 #define POW_TO_EXP2        0x08
 #define LOG_TO_LOG2        0x10
@@ -42,6 +44,22 @@
 #define SAT_TO_CLAMP       0x400
 #define DOPS_TO_DFRAC      0x800
 #define DFREXP_DLDEXP_TO_ARITH    0x1000
+#define BIT_COUNT_TO_MATH         0x02000
+#define EXTRACT_TO_SHIFTS         0x04000
+#define INSERT_TO_SHIFTS          0x08000
+#define REVERSE_TO_SHIFTS         0x10000
+#define FIND_LSB_TO_FLOAT_CAST    0x20000
+#define FIND_MSB_TO_FLOAT_CAST    0x40000
+#define IMUL_HIGH_TO_MUL          0x80000
+#define DDIV_TO_MUL_RCP           0x100000
+#define DIV_TO_MUL_RCP            (FDIV_TO_MUL_RCP | DDIV_TO_MUL_RCP)
+#define SQRT_TO_ABS_SQRT          0x200000
+
+/* Opertaions for lower_64bit_integer_instructions() */
+#define MUL64                     (1U << 0)
+#define SIGN64                    (1U << 1)
+#define DIV64                     (1U << 2)
+#define MOD64                     (1U << 3)
 
 /**
  * \see class lower_packing_builtins_visitor
@@ -101,7 +119,8 @@ bool do_lower_texture_projection(exec_list *instructions);
 bool do_if_simplification(exec_list *instructions);
 bool opt_flatten_nested_if_blocks(exec_list *instructions);
 bool do_discard_simplification(exec_list *instructions);
-bool lower_if_to_cond_assign(exec_list *instructions, unsigned max_depth = 0);
+bool lower_if_to_cond_assign(gl_shader_stage stage, exec_list *instructions,
+                             unsigned max_depth = 0, unsigned min_branch_cost = 0);
 bool do_mat_op_to_vec(exec_list *instructions);
 bool do_minmax_prune(exec_list *instructions);
 bool do_noop_swizzle(exec_list *instructions);
@@ -119,7 +138,7 @@ bool lower_variable_index_to_cond_assign(gl_shader_stage stage,
     exec_list *instructions, bool lower_input, bool lower_output,
     bool lower_temp, bool lower_uniform);
 bool lower_quadop_vector(exec_list *instructions, bool dont_lower_swz);
-bool lower_const_arrays_to_uniforms(exec_list *instructions);
+bool lower_const_arrays_to_uniforms(exec_list *instructions, unsigned stage);
 bool lower_clip_cull_distance(struct gl_shader_program *prog,
                               gl_linked_shader *shader);
 void lower_output_reads(unsigned stage, exec_list *instructions);
@@ -129,7 +148,9 @@ void lower_shared_reference(struct gl_linked_shader *shader,
 void lower_ubo_reference(struct gl_linked_shader *shader,
                          bool clamp_block_indices);
 void lower_packed_varyings(void *mem_ctx,
-                           unsigned locations_used, ir_variable_mode mode,
+                           unsigned locations_used,
+                           const uint8_t *components,
+                           ir_variable_mode mode,
                            unsigned gs_input_vertices,
                            gl_linked_shader *shader,
                            bool disable_varying_packing, bool xfb_enabled);
@@ -144,6 +165,7 @@ void optimize_dead_builtin_variables(exec_list *instructions,
 bool lower_tess_level(gl_linked_shader *shader);
 
 bool lower_vertex_id(gl_linked_shader *shader);
+bool lower_blend_equation_advanced(gl_linked_shader *shader);
 
 bool lower_subroutine(exec_list *instructions, struct _mesa_glsl_parse_state *state);
 void propagate_invariance(exec_list *instructions);
@@ -151,3 +173,8 @@ void propagate_invariance(exec_list *instructions);
 ir_rvalue *
 compare_index_block(exec_list *instructions, ir_variable *index,
 		    unsigned base, unsigned components, void *mem_ctx);
+
+bool lower_64bit_integer_instructions(exec_list *instructions,
+                                      unsigned what_to_lower);
+
+#endif /* GLSL_IR_OPTIMIZATION_H */

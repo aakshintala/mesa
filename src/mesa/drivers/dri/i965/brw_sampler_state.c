@@ -88,6 +88,7 @@ brw_emit_sampler_state(struct brw_context *brw,
                        unsigned wrap_s,
                        unsigned wrap_t,
                        unsigned wrap_r,
+                       unsigned base_level,
                        unsigned min_lod,
                        unsigned max_lod,
                        int lod_bias,
@@ -103,10 +104,9 @@ brw_emit_sampler_state(struct brw_context *brw,
    ss[2] = border_color_offset;
    if (brw->gen < 6) {
       ss[2] += brw->batch.bo->offset64; /* reloc */
-      drm_intel_bo_emit_reloc(brw->batch.bo,
-                              batch_offset_for_sampler_state + 8,
-                              brw->batch.bo, border_color_offset,
-                              I915_GEM_DOMAIN_SAMPLER, 0);
+      brw_emit_reloc(&brw->batch, batch_offset_for_sampler_state + 8,
+                     brw->batch.bo, border_color_offset,
+                     I915_GEM_DOMAIN_SAMPLER, 0);
    }
 
    ss[3] = SET_FIELD(max_anisotropy, BRW_SAMPLER_MAX_ANISOTROPY) |
@@ -132,6 +132,21 @@ brw_emit_sampler_state(struct brw_context *brw,
       ss[0] |= SET_FIELD(lod_bias & 0x7ff, GEN4_SAMPLER_LOD_BIAS) |
                SET_FIELD(shadow_function, GEN4_SAMPLER_SHADOW_FUNCTION);
 
+      /* This field has existed since the original i965, but is declared MBZ
+       * until Sandy Bridge.  According to the PRM:
+       *
+       *    "This was added to match OpenGL semantics"
+       *
+       * In particular, OpenGL allowed you to offset by 0.5 in certain cases
+       * to get slightly better filtering.  On Ivy Bridge and above, it
+       * appears that this is added to RENDER_SURFACE_STATE::SurfaceMinLOD so
+       * the right value is 0.0 or 0.5 (if you want the wacky behavior).  On
+       * Sandy Bridge, however, this sum does not seem to occur and you have
+       * to set it to the actual base level of the texture.
+       */
+      if (brw->gen == 6)
+         ss[0] |= SET_FIELD(base_level, BRW_SAMPLER_BASE_MIPLEVEL);
+
       if (brw->gen == 6 && min_filter != mag_filter)
          ss[0] |= GEN6_SAMPLER_MIN_MAG_NOT_EQUAL;
 
@@ -149,7 +164,7 @@ brw_emit_sampler_state(struct brw_context *brw,
 static uint32_t
 translate_wrap_mode(struct brw_context *brw, GLenum wrap, bool using_nearest)
 {
-   switch( wrap ) {
+   switch (wrap) {
    case GL_REPEAT:
       return BRW_TEXCOORDMODE_WRAP;
    case GL_CLAMP:
@@ -196,6 +211,16 @@ wrap_mode_needs_border_color(unsigned wrap_mode)
           wrap_mode == GEN8_TEXCOORDMODE_HALF_BORDER;
 }
 
+static bool
+has_component(mesa_format format, int i)
+{
+   if (_mesa_is_format_color_format(format))
+      return _mesa_format_has_color_component(format, i);
+
+   /* depth and stencil have only one component */
+   return i == 0;
+}
+
 /**
  * Upload SAMPLER_BORDER_COLOR_STATE.
  */
@@ -203,7 +228,7 @@ static void
 upload_default_color(struct brw_context *brw,
                      const struct gl_sampler_object *sampler,
                      mesa_format format, GLenum base_format,
-                     bool is_integer_format,
+                     bool is_integer_format, bool is_stencil_sampling,
                      uint32_t *sdc_offset)
 {
    union gl_color_union color;
@@ -264,10 +289,9 @@ upload_default_color(struct brw_context *brw,
        * format.  This matches the sampler->BorderColor union exactly; just
        * memcpy the values.
        */
-      uint32_t *sdc = brw_state_batch(brw, AUB_TRACE_SAMPLER_DEFAULT_COLOR,
-                                      4 * 4, 64, sdc_offset);
+      uint32_t *sdc = brw_state_batch(brw, 4 * 4, 64, sdc_offset);
       memcpy(sdc, color.ui, 4 * 4);
-   } else if (brw->is_haswell && is_integer_format) {
+   } else if (brw->is_haswell && (is_integer_format || is_stencil_sampling)) {
       /* Haswell's integer border color support is completely insane:
        * SAMPLER_BORDER_COLOR_STATE is 20 DWords.  The first four are
        * for float colors.  The next 12 DWords are MBZ and only exist to
@@ -276,12 +300,13 @@ upload_default_color(struct brw_context *brw,
        * has the "Integer Surface Format" bit set.  Even then, the
        * arrangement of the RGBA data devolves into madness.
        */
-      uint32_t *sdc = brw_state_batch(brw, AUB_TRACE_SAMPLER_DEFAULT_COLOR,
-                                      20 * 4, 512, sdc_offset);
+      uint32_t *sdc = brw_state_batch(brw, 20 * 4, 512, sdc_offset);
       memset(sdc, 0, 20 * 4);
       sdc = &sdc[16];
 
-      int bits_per_channel = _mesa_get_format_bits(format, GL_RED_BITS);
+      bool stencil = format == MESA_FORMAT_S_UINT8 || is_stencil_sampling;
+      const int bits_per_channel =
+         _mesa_get_format_bits(format, stencil ? GL_STENCIL_BITS : GL_RED_BITS);
 
       /* From the Haswell PRM, "Command Reference: Structures", Page 36:
        * "If any color channel is missing from the surface format,
@@ -291,7 +316,7 @@ upload_default_color(struct brw_context *brw,
        */
       unsigned c[4] = { 0, 0, 0, 1 };
       for (int i = 0; i < 4; i++) {
-         if (_mesa_format_has_color_component(format, i))
+         if (has_component(format, i))
             c[i] = color.ui[i];
       }
 
@@ -331,8 +356,7 @@ upload_default_color(struct brw_context *brw,
    } else if (brw->gen == 5 || brw->gen == 6) {
       struct gen5_sampler_default_color *sdc;
 
-      sdc = brw_state_batch(brw, AUB_TRACE_SAMPLER_DEFAULT_COLOR,
-			    sizeof(*sdc), 32, sdc_offset);
+      sdc = brw_state_batch(brw, sizeof(*sdc), 32, sdc_offset);
 
       memset(sdc, 0, sizeof(*sdc));
 
@@ -366,8 +390,7 @@ upload_default_color(struct brw_context *brw,
       sdc->f[2] = color.f[2];
       sdc->f[3] = color.f[3];
    } else {
-      float *sdc = brw_state_batch(brw, AUB_TRACE_SAMPLER_DEFAULT_COLOR,
-			           4 * 4, 32, sdc_offset);
+      float *sdc = brw_state_batch(brw, 4 * 4, 32, sdc_offset);
       memcpy(sdc, color.f, 4 * 4);
    }
 }
@@ -376,12 +399,12 @@ upload_default_color(struct brw_context *brw,
  * Sets the sampler state for a single unit based off of the sampler key
  * entry.
  */
-void
+static void
 brw_update_sampler_state(struct brw_context *brw,
                          GLenum target, bool tex_cube_map_seamless,
                          GLfloat tex_unit_lod_bias,
                          mesa_format format, GLenum base_format,
-                         bool is_integer_format,
+                         const struct gl_texture_object *texObj,
                          const struct gl_sampler_object *sampler,
                          uint32_t *sampler_state,
                          uint32_t batch_offset_for_sampler_state)
@@ -464,7 +487,7 @@ brw_update_sampler_state(struct brw_context *brw,
        * integer formats.  Fall back to CLAMP for now.
        */
       if ((tex_cube_map_seamless || sampler->CubeMapSeamless) &&
-          !(brw->gen == 7 && !brw->is_haswell && is_integer_format)) {
+          !(brw->gen == 7 && !brw->is_haswell && texObj->_IsIntegerFormat)) {
 	 wrap_s = BRW_TEXCOORDMODE_CUBE;
 	 wrap_t = BRW_TEXCOORDMODE_CUBE;
 	 wrap_r = BRW_TEXCOORDMODE_CUBE;
@@ -490,8 +513,13 @@ brw_update_sampler_state(struct brw_context *brw,
    }
 
    const int lod_bits = brw->gen >= 7 ? 8 : 6;
-   const unsigned min_lod = U_FIXED(CLAMP(sampler->MinLod, 0, 13), lod_bits);
-   const unsigned max_lod = U_FIXED(CLAMP(sampler->MaxLod, 0, 13), lod_bits);
+   const float hw_max_lod = brw->gen >= 7 ? 14 : 13;
+   const unsigned base_level =
+      U_FIXED(CLAMP(texObj->MinLevel + texObj->BaseLevel, 0, hw_max_lod), 1);
+   const unsigned min_lod =
+      U_FIXED(CLAMP(sampler->MinLod, 0, hw_max_lod), lod_bits);
+   const unsigned max_lod =
+      U_FIXED(CLAMP(sampler->MaxLod, 0, hw_max_lod), lod_bits);
    const int lod_bias =
       S_FIXED(CLAMP(tex_unit_lod_bias + sampler->LodBias, -16, 15), lod_bits);
 
@@ -503,8 +531,8 @@ brw_update_sampler_state(struct brw_context *brw,
    if (wrap_mode_needs_border_color(wrap_s) ||
        wrap_mode_needs_border_color(wrap_t) ||
        wrap_mode_needs_border_color(wrap_r)) {
-      upload_default_color(brw, sampler,
-                           format, base_format, is_integer_format,
+      upload_default_color(brw, sampler, format, base_format,
+                           texObj->_IsIntegerFormat, texObj->StencilSampling,
                            &border_color_offset);
    }
 
@@ -517,7 +545,7 @@ brw_update_sampler_state(struct brw_context *brw,
                           max_anisotropy,
                           address_rounding,
                           wrap_s, wrap_t, wrap_r,
-                          min_lod, max_lod, lod_bias,
+                          base_level, min_lod, max_lod, lod_bias,
                           shadow_function,
                           non_normalized_coords,
                           border_color_offset);
@@ -542,8 +570,7 @@ update_sampler_state(struct brw_context *brw,
    brw_update_sampler_state(brw, texObj->Target, ctx->Texture.CubeMapSeamless,
                             texUnit->LodBias,
                             firstImage->TexFormat, firstImage->_BaseFormat,
-                            texObj->_IsIntegerFormat,
-                            sampler,
+                            texObj, sampler,
                             sampler_state, batch_offset_for_sampler_state);
 }
 
@@ -564,7 +591,7 @@ brw_upload_sampler_state_table(struct brw_context *brw,
    const int dwords = 4;
    const int size_in_bytes = dwords * sizeof(uint32_t);
 
-   uint32_t *sampler_state = brw_state_batch(brw, AUB_TRACE_SAMPLER_STATE,
+   uint32_t *sampler_state = brw_state_batch(brw,
                                              sampler_count * size_in_bytes,
                                              32, &stage_state->sampler_offset);
    memset(sampler_state, 0, sampler_count * size_in_bytes);

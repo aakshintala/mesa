@@ -112,8 +112,7 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
    if (texture->nr_samples > 1)
       return false;
 
-   if (!screen->is_format_supported(screen, dst_format, PIPE_TEXTURE_2D,
-                                    texture->nr_samples,
+   if (!screen->is_format_supported(screen, dst_format, PIPE_BUFFER, 0,
                                     PIPE_BIND_SHADER_IMAGE))
       return false;
 
@@ -132,6 +131,7 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
    cso_save_state(cso, (CSO_BIT_FRAGMENT_SAMPLER_VIEWS |
                         CSO_BIT_FRAGMENT_SAMPLERS |
                         CSO_BIT_FRAGMENT_IMAGE0 |
+                        CSO_BIT_BLEND |
                         CSO_BIT_VERTEX_ELEMENTS |
                         CSO_BIT_AUX_VERTEX_BUFFER_SLOT |
                         CSO_BIT_FRAMEBUFFER |
@@ -140,8 +140,15 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
                         CSO_BIT_DEPTH_STENCIL_ALPHA |
                         CSO_BIT_STREAM_OUTPUTS |
                         CSO_BIT_PAUSE_QUERIES |
+                        CSO_BIT_SAMPLE_MASK |
+                        CSO_BIT_MIN_SAMPLES |
+                        CSO_BIT_RENDER_CONDITION |
                         CSO_BITS_ALL_SHADERS));
    cso_save_constant_buffer_slot0(cso, PIPE_SHADER_FRAGMENT);
+
+   cso_set_sample_mask(cso, ~0);
+   cso_set_min_samples(cso, 1);
+   cso_set_render_condition(cso, NULL, FALSE, 0);
 
    /* Set up the sampler_view */
    {
@@ -192,8 +199,9 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
       image.resource = addr.buffer;
       image.format = dst_format;
       image.access = PIPE_IMAGE_ACCESS_WRITE;
-      image.u.buf.first_element = addr.first_element;
-      image.u.buf.last_element = addr.last_element;
+      image.u.buf.offset = addr.first_element * addr.bytes_per_pixel;
+      image.u.buf.size = (addr.last_element - addr.first_element + 1) *
+                         addr.bytes_per_pixel;
 
       cso_set_shader_images(cso, PIPE_SHADER_FRAGMENT, 0, 1, &image);
    }
@@ -205,6 +213,11 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
    fb.samples = 1;
    fb.layers = 1;
    cso_set_framebuffer(cso, &fb);
+
+   /* Any blend state would do. Set this just to prevent drivers having
+    * blend == NULL.
+    */
+   cso_set_blend(cso, &st->pbo.upload_blend);
 
    cso_set_viewport_dims(cso, fb.width, fb.height, invert_y);
 
@@ -219,7 +232,7 @@ try_pbo_readpixels(struct st_context *st, struct st_renderbuffer *strb,
 
    /* Set up the fragment shader */
    {
-      void *fs = st_pbo_get_download_fs(st, view_target);
+      void *fs = st_pbo_get_download_fs(st, view_target, src_format, dst_format);
       if (!fs)
          goto fail;
 
@@ -236,14 +249,6 @@ fail:
    cso_restore_constant_buffer_slot0(cso, PIPE_SHADER_FRAGMENT);
 
    return success;
-}
-
-/* Invalidate the readpixels cache to ensure we don't read stale data.
- */
-void st_invalidate_readpix_cache(struct st_context *st)
-{
-   pipe_resource_reference(&st->readpix_cache.src, NULL);
-   pipe_resource_reference(&st->readpix_cache.cache, NULL);
 }
 
 /**
@@ -273,7 +278,6 @@ blit_to_staging(struct st_context *st, struct st_renderbuffer *strb,
    memset(&dst_templ, 0, sizeof(dst_templ));
    dst_templ.target = PIPE_TEXTURE_2D;
    dst_templ.format = dst_format;
-   dst_templ.bind = PIPE_BIND_TRANSFER_READ;
    if (util_format_is_depth_or_stencil(dst_format))
       dst_templ.bind |= PIPE_BIND_DEPTH_STENCIL;
    else
@@ -403,14 +407,14 @@ st_ReadPixels(struct gl_context *ctx, GLint x, GLint y,
    struct pipe_resource *src;
    struct pipe_resource *dst = NULL;
    enum pipe_format dst_format, src_format;
-   unsigned bind = PIPE_BIND_TRANSFER_READ;
+   unsigned bind;
    struct pipe_transfer *tex_xfer;
    ubyte *map = NULL;
    int dst_x, dst_y;
 
    /* Validate state (to be sure we have up-to-date framebuffer surfaces)
     * and flush the bitmap cache prior to reading. */
-   st_validate_state(st, ST_PIPELINE_RENDER);
+   st_validate_state(st, ST_PIPELINE_UPDATE_FRAMEBUFFER);
    st_flush_bitmap_cache(st);
 
    if (!st->prefer_blit_based_texture_transfer) {
@@ -451,9 +455,9 @@ st_ReadPixels(struct gl_context *ctx, GLint x, GLint y,
    }
 
    if (format == GL_DEPTH_COMPONENT || format == GL_DEPTH_STENCIL)
-      bind |= PIPE_BIND_DEPTH_STENCIL;
+      bind = PIPE_BIND_DEPTH_STENCIL;
    else
-      bind |= PIPE_BIND_RENDER_TARGET;
+      bind = PIPE_BIND_RENDER_TARGET;
 
    /* Choose the destination format by finding the best match
     * for the format+type combo. */

@@ -59,8 +59,47 @@ static void dump_info(struct ir3_shader_variant *so, const char *str)
 
 int st_glsl_type_size(const struct glsl_type *type);
 
+static void
+insert_sorted(struct exec_list *var_list, nir_variable *new_var)
+{
+	nir_foreach_variable(var, var_list) {
+		if (var->data.location > new_var->data.location) {
+			exec_node_insert_node_before(&var->node, &new_var->node);
+			return;
+		}
+	}
+	exec_list_push_tail(var_list, &new_var->node);
+}
+
+static void
+sort_varyings(struct exec_list *var_list)
+{
+	struct exec_list new_list;
+	exec_list_make_empty(&new_list);
+	nir_foreach_variable_safe(var, var_list) {
+		exec_node_remove(&var->node);
+		insert_sorted(&new_list, var);
+	}
+	exec_list_move_nodes_to(&new_list, var_list);
+}
+
+static void
+fixup_varying_slots(struct exec_list *var_list)
+{
+	nir_foreach_variable(var, var_list) {
+		if (var->data.location >= VARYING_SLOT_VAR0) {
+			var->data.location += 9;
+		} else if ((var->data.location >= VARYING_SLOT_TEX0) &&
+				(var->data.location <= VARYING_SLOT_TEX7)) {
+			var->data.location += VARYING_SLOT_VAR0 - VARYING_SLOT_TEX0;
+		}
+	}
+}
+
+static struct ir3_compiler *compiler;
+
 static nir_shader *
-load_glsl(const char *filename, gl_shader_stage stage)
+load_glsl(unsigned num_files, char* const* files, gl_shader_stage stage)
 {
 	static const struct standalone_options options = {
 			.glsl_version = 140,
@@ -68,13 +107,11 @@ load_glsl(const char *filename, gl_shader_stage stage)
 	};
 	struct gl_shader_program *prog;
 
-	prog = standalone_compile_shader(&options, 1, (char * const*)&filename);
+	prog = standalone_compile_shader(&options, num_files, files);
 	if (!prog)
-		errx(1, "couldn't parse `%s'", filename);
+		errx(1, "couldn't parse `%s'", files[0]);
 
-	nir_shader *nir = glsl_to_nir(prog, stage, ir3_get_compiler_options());
-
-	standalone_compiler_cleanup(prog);
+	nir_shader *nir = glsl_to_nir(prog, stage, ir3_get_compiler_options(compiler));
 
 	/* required NIR passes: */
 	/* TODO cmdline args for some of the conditional lowering passes? */
@@ -90,10 +127,41 @@ load_glsl(const char *filename, gl_shader_stage stage)
 	NIR_PASS_V(nir, nir_lower_var_copies);
 	NIR_PASS_V(nir, nir_lower_io_types);
 
-	// TODO nir_assign_var_locations??
+	switch (stage) {
+	case MESA_SHADER_VERTEX:
+		nir_assign_var_locations(&nir->inputs,
+				&nir->num_inputs,
+				st_glsl_type_size);
+
+		/* Re-lower global vars, to deal with any dead VS inputs. */
+		NIR_PASS_V(nir, nir_lower_global_vars_to_local);
+
+		sort_varyings(&nir->outputs);
+		nir_assign_var_locations(&nir->outputs,
+				&nir->num_outputs,
+				st_glsl_type_size);
+		fixup_varying_slots(&nir->outputs);
+		break;
+	case MESA_SHADER_FRAGMENT:
+		sort_varyings(&nir->inputs);
+		nir_assign_var_locations(&nir->inputs,
+				&nir->num_inputs,
+				st_glsl_type_size);
+		fixup_varying_slots(&nir->inputs);
+		nir_assign_var_locations(&nir->outputs,
+				&nir->num_outputs,
+				st_glsl_type_size);
+		break;
+	default:
+		errx(1, "unhandled shader stage: %d", stage);
+	}
+
+	nir_assign_var_locations(&nir->uniforms,
+			&nir->num_uniforms,
+			st_glsl_type_size);
 
 	NIR_PASS_V(nir, nir_lower_system_values);
-	NIR_PASS_V(nir, nir_lower_io, nir_var_all, st_glsl_type_size);
+	NIR_PASS_V(nir, nir_lower_io, nir_var_all, st_glsl_type_size, 0);
 	NIR_PASS_V(nir, nir_lower_samplers, prog);
 
 	return nir;
@@ -129,7 +197,7 @@ read_file(const char *filename, void **ptr, size_t *size)
 
 static void print_usage(void)
 {
-	printf("Usage: ir3_compiler [OPTIONS]... <file.tgsi | file.vert | file.frag>\n");
+	printf("Usage: ir3_compiler [OPTIONS]... <file.tgsi | (file.vert | file.frag)*>\n");
 	printf("    --verbose         - verbose compiler/debug messages\n");
 	printf("    --binning-pass    - generate binning pass shader (VERT)\n");
 	printf("    --color-two-side  - emulate two-sided color (FRAG)\n");
@@ -147,7 +215,9 @@ static void print_usage(void)
 int main(int argc, char **argv)
 {
 	int ret = 0, n = 1;
-	const char *filename;
+	char *filenames[2];
+	int num_files = 0;
+	unsigned stage = 0;
 	struct ir3_shader_variant v;
 	struct ir3_shader s;
 	struct ir3_shader_key key = {};
@@ -264,44 +334,67 @@ int main(int argc, char **argv)
 	}
 	debug_printf("\n");
 
-	filename = argv[n];
+	while (n < argc) {
+		char *filename = argv[n];
+		char *ext = rindex(filename, '.');
 
-	ret = read_file(filename, &ptr, &size);
-	if (ret) {
-		print_usage();
-		return ret;
+		if (strcmp(ext, ".tgsi") == 0) {
+			if (num_files != 0)
+				errx(1, "in TGSI mode, only a single file may be specified");
+			s.from_tgsi = true;
+		} else if (strcmp(ext, ".frag") == 0) {
+			if (s.from_tgsi)
+				errx(1, "cannot mix GLSL and TGSI");
+			if (num_files >= ARRAY_SIZE(filenames))
+				errx(1, "too many GLSL files");
+			stage = MESA_SHADER_FRAGMENT;
+		} else if (strcmp(ext, ".vert") == 0) {
+			if (s.from_tgsi)
+				errx(1, "cannot mix GLSL and TGSI");
+			if (num_files >= ARRAY_SIZE(filenames))
+				errx(1, "too many GLSL files");
+			stage = MESA_SHADER_VERTEX;
+		} else {
+			print_usage();
+			return -1;
+		}
+
+		filenames[num_files++] = filename;
+
+		n++;
 	}
-
-	if (fd_mesa_debug & FD_DBG_OPTMSGS)
-		debug_printf("%s\n", (char *)ptr);
 
 	nir_shader *nir;
 
-	char *ext = rindex(filename, '.');
+	compiler = ir3_compiler_create(NULL, gpu_id);
 
-	if (strcmp(ext, ".tgsi") == 0) {
+	if (s.from_tgsi) {
 		struct tgsi_token toks[65536];
 
+		ret = read_file(filenames[0], &ptr, &size);
+		if (ret) {
+			print_usage();
+			return ret;
+		}
+
+		if (fd_mesa_debug & FD_DBG_OPTMSGS)
+			debug_printf("%s\n", (char *)ptr);
+
 		if (!tgsi_text_translate(ptr, toks, ARRAY_SIZE(toks)))
-			errx(1, "could not parse `%s'", filename);
+			errx(1, "could not parse `%s'", filenames[0]);
 
 		if (fd_mesa_debug & FD_DBG_OPTMSGS)
 			tgsi_dump(toks, 0);
 
 		nir = ir3_tgsi_to_nir(toks);
-		s.from_tgsi = true;
-	} else if (strcmp(ext, ".frag") == 0) {
-		nir = load_glsl(filename, MESA_SHADER_FRAGMENT);
-		s.from_tgsi = false;
-	} else if (strcmp(ext, ".vert") == 0) {
-		nir = load_glsl(filename, MESA_SHADER_FRAGMENT);
-		s.from_tgsi = false;
+	} else if (num_files > 0) {
+		nir = load_glsl(num_files, filenames, stage);
 	} else {
 		print_usage();
 		return -1;
 	}
 
-	s.compiler = ir3_compiler_create(NULL, gpu_id);
+	s.compiler = compiler;
 	s.nir = ir3_optimize_nir(&s, nir, NULL);
 
 	v.key = key;

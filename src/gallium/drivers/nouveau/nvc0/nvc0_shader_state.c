@@ -34,8 +34,6 @@ static inline void
 nvc0_program_update_context_state(struct nvc0_context *nvc0,
                                   struct nvc0_program *prog, int stage)
 {
-   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
-
    if (prog && prog->need_tls) {
       const uint32_t flags = NV_VRAM_DOMAIN(&nvc0->screen->base) | NOUVEAU_BO_RDWR;
       if (!nvc0->state.tls_required)
@@ -45,24 +43,6 @@ nvc0_program_update_context_state(struct nvc0_context *nvc0,
       if (nvc0->state.tls_required == (1 << stage))
          nouveau_bufctx_reset(nvc0->bufctx_3d, NVC0_BIND_3D_TLS);
       nvc0->state.tls_required &= ~(1 << stage);
-   }
-
-   if (prog && prog->immd_size) {
-      BEGIN_NVC0(push, NVC0_3D(CB_SIZE), 3);
-      /* NOTE: may overlap code of a different shader */
-      PUSH_DATA (push, align(prog->immd_size, 0x100));
-      PUSH_DATAh(push, nvc0->screen->text->offset + prog->immd_base);
-      PUSH_DATA (push, nvc0->screen->text->offset + prog->immd_base);
-      BEGIN_NVC0(push, NVC0_3D(CB_BIND(stage)), 1);
-      PUSH_DATA (push, (14 << 4) | 1);
-
-      nvc0->state.c14_bound |= 1 << stage;
-   } else
-   if (nvc0->state.c14_bound & (1 << stage)) {
-      BEGIN_NVC0(push, NVC0_3D(CB_BIND(stage)), 1);
-      PUSH_DATA (push, (14 << 4) | 0);
-
-      nvc0->state.c14_bound &= ~(1 << stage);
    }
 }
 
@@ -80,7 +60,7 @@ nvc0_program_validate(struct nvc0_context *nvc0, struct nvc0_program *prog)
    }
 
    if (likely(prog->code_size))
-      return nvc0_program_upload_code(nvc0, prog);
+      return nvc0_program_upload(nvc0, prog);
    return true; /* stream output info only */
 }
 
@@ -166,6 +146,11 @@ nvc0_fragprog_validate(struct nvc0_context *nvc0)
       nvc0->state.early_z_forced = fp->fp.early_z;
       IMMED_NVC0(push, NVC0_3D(FORCE_EARLY_FRAGMENT_TESTS), fp->fp.early_z);
    }
+   if (fp->fp.post_depth_coverage != nvc0->state.post_depth_coverage) {
+      nvc0->state.post_depth_coverage = fp->fp.post_depth_coverage;
+      IMMED_NVC0(push, NVC0_3D(POST_DEPTH_COVERAGE),
+                 fp->fp.post_depth_coverage);
+   }
 
    BEGIN_NVC0(push, NVC0_3D(SP_SELECT(5)), 2);
    PUSH_DATA (push, 0x51);
@@ -240,18 +225,13 @@ nvc0_gmtyprog_validate(struct nvc0_context *nvc0)
 
    /* we allow GPs with no code for specifying stream output state only */
    if (gp && nvc0_program_validate(nvc0, gp) && gp->code_size) {
-      const bool gp_selects_layer = !!(gp->hdr[13] & (1 << 9));
-
       BEGIN_NVC0(push, NVC0_3D(MACRO_GP_SELECT), 1);
       PUSH_DATA (push, 0x41);
       BEGIN_NVC0(push, NVC0_3D(SP_START_ID(4)), 1);
       PUSH_DATA (push, gp->code_base);
       BEGIN_NVC0(push, NVC0_3D(SP_GPR_ALLOC(4)), 1);
       PUSH_DATA (push, gp->num_gprs);
-      BEGIN_NVC0(push, NVC0_3D(LAYER), 1);
-      PUSH_DATA (push, gp_selects_layer ? NVC0_3D_LAYER_USE_GP : 0);
    } else {
-      IMMED_NVC0(push, NVC0_3D(LAYER), 0);
       BEGIN_NVC0(push, NVC0_3D(MACRO_GP_SELECT), 1);
       PUSH_DATA (push, 0x40);
    }
@@ -269,6 +249,27 @@ nvc0_compprog_validate(struct nvc0_context *nvc0)
 
    BEGIN_NVC0(push, NVC0_CP(FLUSH), 1);
    PUSH_DATA (push, NVC0_COMPUTE_FLUSH_CODE);
+}
+
+void
+nvc0_layer_validate(struct nvc0_context *nvc0)
+{
+   struct nouveau_pushbuf *push = nvc0->base.pushbuf;
+   struct nvc0_program *last;
+   bool prog_selects_layer = false;
+
+   if (nvc0->gmtyprog)
+      last = nvc0->gmtyprog;
+   else if (nvc0->tevlprog)
+      last = nvc0->tevlprog;
+   else
+      last = nvc0->vertprog;
+
+   if (last)
+      prog_selects_layer = !!(last->hdr[13] & (1 << 9));
+
+   BEGIN_NVC0(push, NVC0_3D(LAYER), 1);
+   PUSH_DATA (push, prog_selects_layer ? NVC0_3D_LAYER_USE_GP : 0);
 }
 
 void

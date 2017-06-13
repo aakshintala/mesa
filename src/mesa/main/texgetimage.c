@@ -495,13 +495,15 @@ get_tex_rgba_uncompressed(struct gl_context *ctx, GLuint dimensions,
           */
          if (format == rgba_format) {
             rgba = dest;
-         } else if (rgba == NULL) { /* Allocate the RGBA buffer only once */
+         } else {
             need_convert = true;
-            rgba = malloc(height * rgba_stride);
-            if (!rgba) {
-               _mesa_error(ctx, GL_OUT_OF_MEMORY, "glGetTexImage()");
-               ctx->Driver.UnmapTextureImage(ctx, texImage, img);
-               return;
+            if (rgba == NULL) { /* Allocate the RGBA buffer only once */
+               rgba = malloc(height * rgba_stride);
+               if (!rgba) {
+                  _mesa_error(ctx, GL_OUT_OF_MEMORY, "glGetTexImage()");
+                  ctx->Driver.UnmapTextureImage(ctx, texImage, img);
+                  return;
+               }
             }
          }
 
@@ -652,7 +654,7 @@ get_tex_memcpy(struct gl_context *ctx,
 
       if (src) {
          if (bytesPerRow == dstRowStride && bytesPerRow == srcRowStride) {
-            memcpy(dst, src, bytesPerRow * texImage->Height);
+            memcpy(dst, src, bytesPerRow * height);
          }
          else {
             GLuint row;
@@ -1427,6 +1429,11 @@ _mesa_GetTextureImage(GLuint texture, GLint level, GLenum format, GLenum type,
       return;
    }
 
+   if (!legal_getteximage_target(ctx, texObj->Target, true)) {
+      _mesa_error(ctx, GL_INVALID_ENUM, "%s", caller);
+      return;
+   }
+
    get_texture_image_dims(texObj, texObj->Target, level,
                           &width, &height, &depth);
 
@@ -1451,10 +1458,19 @@ _mesa_GetTextureSubImage(GLuint texture, GLint level,
 {
    GET_CURRENT_CONTEXT(ctx);
    static const char *caller = "glGetTextureSubImage";
-   struct gl_texture_object *texObj =
-      _mesa_lookup_texture_err(ctx, texture, caller);
+   struct gl_texture_object *texObj = NULL;
+
+   if (texture > 0)
+      texObj = _mesa_lookup_texture(ctx, texture);
 
    if (!texObj) {
+      _mesa_error(ctx, GL_INVALID_VALUE, "%s(texture)", caller);
+      return;
+   }
+
+   if (!legal_getteximage_target(ctx, texObj->Target, true)) {
+      _mesa_error(ctx, GL_INVALID_OPERATION,
+                  "%s(buffer/multisample texture)", caller);
       return;
    }
 
@@ -1760,10 +1776,13 @@ _mesa_GetCompressedTextureSubImage(GLuint texture, GLint level,
 {
    GET_CURRENT_CONTEXT(ctx);
    static const char *caller = "glGetCompressedTextureImage";
-   struct gl_texture_object *texObj;
+   struct gl_texture_object *texObj = NULL;
 
-   texObj = _mesa_lookup_texture_err(ctx, texture, caller);
+   if (texture > 0)
+      texObj = _mesa_lookup_texture(ctx, texture);
+
    if (!texObj) {
+      _mesa_error(ctx, GL_INVALID_VALUE, "%s(texture)", caller);
       return;
    }
 

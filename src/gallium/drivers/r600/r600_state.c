@@ -235,11 +235,6 @@ boolean r600_is_format_supported(struct pipe_screen *screen,
 		retval |= PIPE_BIND_VERTEX_BUFFER;
 	}
 
-	if (usage & PIPE_BIND_TRANSFER_READ)
-		retval |= PIPE_BIND_TRANSFER_READ;
-	if (usage & PIPE_BIND_TRANSFER_WRITE)
-		retval |= PIPE_BIND_TRANSFER_WRITE;
-
 	if ((usage & PIPE_BIND_LINEAR) &&
 	    !util_format_is_compressed(format) &&
 	    !(usage & PIPE_BIND_DEPTH_STENCIL))
@@ -472,8 +467,10 @@ static void *r600_create_rs_state(struct pipe_context *ctx,
 	r600_init_command_buffer(&rs->buffer, 30);
 
 	rs->scissor_enable = state->scissor;
+	rs->clip_halfz = state->clip_halfz;
 	rs->flatshade = state->flatshade;
 	rs->sprite_coord_enable = state->sprite_coord_enable;
+	rs->rasterizer_discard = state->rasterizer_discard;
 	rs->two_side = state->light_twoside;
 	rs->clip_plane_enable = state->clip_plane_enable;
 	rs->pa_sc_line_stipple = state->line_stipple_enable ?
@@ -626,13 +623,13 @@ static void *r600_create_sampler_state(struct pipe_context *ctx,
 static struct pipe_sampler_view *
 texture_buffer_sampler_view(struct r600_pipe_sampler_view *view,
 			    unsigned width0, unsigned height0)
-			    
+
 {
 	struct r600_texture *tmp = (struct r600_texture*)view->base.texture;
 	int stride = util_format_get_blocksize(view->base.format);
 	unsigned format, num_format, format_comp, endian;
-	uint64_t offset = view->base.u.buf.first_element * stride;
-	unsigned size = (view->base.u.buf.last_element - view->base.u.buf.first_element + 1) * stride;
+	uint64_t offset = view->base.u.buf.offset;
+	unsigned size = view->base.u.buf.size;
 
 	r600_vertex_data_type(view->base.format,
 			      &format, &num_format, &format_comp,
@@ -695,7 +692,7 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	swizzle[3] = state->swizzle_a;
 
 	if (R600_BIG_ENDIAN)
-		do_endian_swap = !(tmp->is_depth && !tmp->is_flushing_texture);
+		do_endian_swap = !tmp->db_compatible;
 
 	format = r600_translate_texformat(ctx->screen, state->format,
 					  swizzle,
@@ -706,7 +703,13 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 		return NULL;
 	}
 
-	if (tmp->is_depth && !tmp->is_flushing_texture && !r600_can_read_depth(tmp)) {
+	if (state->format == PIPE_FORMAT_X24S8_UINT ||
+	    state->format == PIPE_FORMAT_S8X24_UINT ||
+	    state->format == PIPE_FORMAT_X32_S8X24_UINT ||
+	    state->format == PIPE_FORMAT_S8_UINT)
+		view->is_stencil_sampler = true;
+
+	if (tmp->is_depth && !r600_can_sample_zs(tmp, view->is_stencil_sampler)) {
 		if (!r600_init_flushed_depth_texture(ctx, texture, NULL)) {
 			FREE(view);
 			return NULL;
@@ -721,7 +724,7 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	width = width_first_level;
 	height = height_first_level;
         depth = u_minify(texture->depth0, offset_level);
-	pitch = tmp->surface.level[offset_level].nblk_x * util_format_get_blockwidth(state->format);
+	pitch = tmp->surface.u.legacy.level[offset_level].nblk_x * util_format_get_blockwidth(state->format);
 
 	if (texture->target == PIPE_TEXTURE_1D_ARRAY) {
 		height = 1;
@@ -731,7 +734,7 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	} else if (texture->target == PIPE_TEXTURE_CUBE_ARRAY)
 		depth = texture->array_size / 6;
 
-	switch (tmp->surface.level[offset_level].mode) {
+	switch (tmp->surface.u.legacy.level[offset_level].mode) {
 	default:
 	case RADEON_SURF_MODE_LINEAR_ALIGNED:
 		array_mode = V_038000_ARRAY_LINEAR_ALIGNED;
@@ -744,12 +747,6 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 		break;
 	}
 
-	if (state->format == PIPE_FORMAT_X24S8_UINT ||
-	    state->format == PIPE_FORMAT_S8X24_UINT ||
-	    state->format == PIPE_FORMAT_X32_S8X24_UINT ||
-	    state->format == PIPE_FORMAT_S8_UINT)
-		view->is_stencil_sampler = true;
-
 	view->tex_resource = &tmp->resource;
 	view->tex_resource_words[0] = (S_038000_DIM(r600_tex_dim(texture->target, texture->nr_samples)) |
 				       S_038000_TILE_MODE(array_mode) |
@@ -759,11 +756,11 @@ r600_create_sampler_view_custom(struct pipe_context *ctx,
 	view->tex_resource_words[1] = (S_038004_TEX_HEIGHT(height - 1) |
 				       S_038004_TEX_DEPTH(depth - 1) |
 				       S_038004_DATA_FORMAT(format));
-	view->tex_resource_words[2] = tmp->surface.level[offset_level].offset >> 8;
-	if (offset_level >= tmp->surface.last_level) {
-		view->tex_resource_words[3] = tmp->surface.level[offset_level].offset >> 8;
+	view->tex_resource_words[2] = tmp->surface.u.legacy.level[offset_level].offset >> 8;
+	if (offset_level >= tmp->resource.b.b.last_level) {
+		view->tex_resource_words[3] = tmp->surface.u.legacy.level[offset_level].offset >> 8;
 	} else {
-		view->tex_resource_words[3] = tmp->surface.level[offset_level + 1].offset >> 8;
+		view->tex_resource_words[3] = tmp->surface.u.legacy.level[offset_level + 1].offset >> 8;
 	}
 	view->tex_resource_words[4] = (word4 |
 				       S_038010_REQUEST_SIZE(1) |
@@ -806,26 +803,6 @@ static void r600_set_polygon_stipple(struct pipe_context *ctx,
 {
 }
 
-static struct r600_resource *r600_buffer_create_helper(struct r600_screen *rscreen,
-						       unsigned size, unsigned alignment)
-{
-	struct pipe_resource buffer;
-
-	memset(&buffer, 0, sizeof buffer);
-	buffer.target = PIPE_BUFFER;
-	buffer.format = PIPE_FORMAT_R8_UNORM;
-	buffer.bind = PIPE_BIND_CUSTOM;
-	buffer.usage = PIPE_USAGE_DEFAULT;
-	buffer.flags = 0;
-	buffer.width0 = size;
-	buffer.height0 = 1;
-	buffer.depth0 = 1;
-	buffer.array_size = 1;
-
-	return (struct r600_resource*)
-		r600_buffer_create(&rscreen->b.b, &buffer, alignment);
-}
-
 static void r600_init_color_surface(struct r600_context *rctx,
 				    struct r600_surface *surf,
 				    bool force_cmask_fmask)
@@ -842,23 +819,23 @@ static void r600_init_color_surface(struct r600_context *rctx,
 	int i;
 	bool blend_bypass = 0, blend_clamp = 1, do_endian_swap = FALSE;
 
-	if (rtex->is_depth && !rtex->is_flushing_texture && !r600_can_read_depth(rtex)) {
+	if (rtex->db_compatible && !r600_can_sample_zs(rtex, false)) {
 		r600_init_flushed_depth_texture(&rctx->b.b, surf->base.texture, NULL);
 		rtex = rtex->flushed_depth_texture;
 		assert(rtex);
 	}
 
-	offset = rtex->surface.level[level].offset;
+	offset = rtex->surface.u.legacy.level[level].offset;
 	color_view = S_028080_SLICE_START(surf->base.u.tex.first_layer) |
 		     S_028080_SLICE_MAX(surf->base.u.tex.last_layer);
 
-	pitch = rtex->surface.level[level].nblk_x / 8 - 1;
-	slice = (rtex->surface.level[level].nblk_x * rtex->surface.level[level].nblk_y) / 64;
+	pitch = rtex->surface.u.legacy.level[level].nblk_x / 8 - 1;
+	slice = (rtex->surface.u.legacy.level[level].nblk_x * rtex->surface.u.legacy.level[level].nblk_y) / 64;
 	if (slice) {
 		slice = slice - 1;
 	}
 	color_info = 0;
-	switch (rtex->surface.level[level].mode) {
+	switch (rtex->surface.u.legacy.level[level].mode) {
 	default:
 	case RADEON_SURF_MODE_LINEAR_ALIGNED:
 		color_info = S_0280A0_ARRAY_MODE(V_038000_ARRAY_LINEAR_ALIGNED);
@@ -895,7 +872,7 @@ static void r600_init_color_surface(struct r600_context *rctx,
 	}
 
 	if (R600_BIG_ENDIAN)
-		do_endian_swap = !(rtex->is_depth && !rtex->is_flushing_texture);
+		do_endian_swap = !rtex->db_compatible;
 
 	format = r600_translate_colorformat(rctx->b.chip_class, surf->base.format,
 			                              do_endian_swap);
@@ -1002,7 +979,15 @@ static void r600_init_color_surface(struct r600_context *rctx,
 			void *ptr;
 
 			r600_resource_reference(&rctx->dummy_cmask, NULL);
-			rctx->dummy_cmask = r600_buffer_create_helper(rscreen, cmask.size, cmask.alignment);
+			rctx->dummy_cmask = (struct r600_resource*)
+				r600_aligned_buffer_create(&rscreen->b.b, 0,
+							   PIPE_USAGE_DEFAULT,
+							   cmask.size, cmask.alignment);
+
+			if (unlikely(!rctx->dummy_cmask)) {
+				surf->color_initialized = false;
+				return;
+			}
 
 			/* Set the contents to 0xCC. */
 			ptr = pipe_buffer_map(&rctx->b.b, &rctx->dummy_cmask->b.b, PIPE_TRANSFER_WRITE, &transfer);
@@ -1016,8 +1001,15 @@ static void r600_init_color_surface(struct r600_context *rctx,
 		    rctx->dummy_fmask->b.b.width0 < fmask.size ||
 		    rctx->dummy_fmask->buf->alignment % fmask.alignment != 0) {
 			r600_resource_reference(&rctx->dummy_fmask, NULL);
-			rctx->dummy_fmask = r600_buffer_create_helper(rscreen, fmask.size, fmask.alignment);
+			rctx->dummy_fmask = (struct r600_resource*)
+				r600_aligned_buffer_create(&rscreen->b.b, 0,
+							   PIPE_USAGE_DEFAULT,
+							   fmask.size, fmask.alignment);
 
+			if (unlikely(!rctx->dummy_fmask)) {
+				surf->color_initialized = false;
+				return;
+			}
 		}
 		r600_resource_reference(&surf->cb_buffer_fmask, rctx->dummy_fmask);
 
@@ -1041,13 +1033,13 @@ static void r600_init_depth_surface(struct r600_context *rctx,
 	unsigned level, pitch, slice, format, offset, array_mode;
 
 	level = surf->base.u.tex.level;
-	offset = rtex->surface.level[level].offset;
-	pitch = rtex->surface.level[level].nblk_x / 8 - 1;
-	slice = (rtex->surface.level[level].nblk_x * rtex->surface.level[level].nblk_y) / 64;
+	offset = rtex->surface.u.legacy.level[level].offset;
+	pitch = rtex->surface.u.legacy.level[level].nblk_x / 8 - 1;
+	slice = (rtex->surface.u.legacy.level[level].nblk_x * rtex->surface.u.legacy.level[level].nblk_y) / 64;
 	if (slice) {
 		slice = slice - 1;
 	}
-	switch (rtex->surface.level[level].mode) {
+	switch (rtex->surface.u.legacy.level[level].mode) {
 	case RADEON_SURF_MODE_2D:
 		array_mode = V_0280A0_ARRAY_2D_TILED_THIN1;
 		break;
@@ -1066,11 +1058,11 @@ static void r600_init_depth_surface(struct r600_context *rctx,
 	surf->db_depth_view = S_028004_SLICE_START(surf->base.u.tex.first_layer) |
 			      S_028004_SLICE_MAX(surf->base.u.tex.last_layer);
 	surf->db_depth_size = S_028000_PITCH_TILE_MAX(pitch) | S_028000_SLICE_TILE_MAX(slice);
-	surf->db_prefetch_limit = (rtex->surface.level[level].nblk_y / 8) - 1;
+	surf->db_prefetch_limit = (rtex->surface.u.legacy.level[level].nblk_y / 8) - 1;
 
 	/* use htile only for first level */
-	if (rtex->htile_buffer && !level) {
-		surf->db_htile_data_base = 0;
+	if (rtex->htile_offset && !level) {
+		surf->db_htile_data_base = rtex->htile_offset >> 8;
 		surf->db_htile_surface = S_028D24_HTILE_WIDTH(1) |
 					 S_028D24_HTILE_HEIGHT(1) |
 					 S_028D24_FULL_CACHE(1);
@@ -1140,7 +1132,7 @@ static void r600_set_framebuffer_state(struct pipe_context *ctx,
 			rctx->framebuffer.export_16bpc = false;
 		}
 
-		if (rtex->fmask.size && rtex->cmask.size) {
+		if (rtex->fmask.size) {
 			rctx->framebuffer.compressed_cb_mask |= 1 << i;
 		}
 	}
@@ -1217,6 +1209,7 @@ static void r600_set_framebuffer_state(struct pipe_context *ctx,
 	r600_mark_atom_dirty(rctx, &rctx->framebuffer.atom);
 
 	r600_set_sample_locations_constant_buffer(rctx);
+	rctx->framebuffer.do_update_surf_dirtiness = true;
 }
 
 static uint32_t sample_locs_2x[] = {
@@ -1356,7 +1349,7 @@ static void r600_emit_framebuffer_state(struct r600_context *rctx, struct r600_a
 		radeon_emit(cs, cb[i] ? cb[i]->cb_color_info : 0);
 	}
 	/* set CB_COLOR1_INFO for possible dual-src blending */
-	if (i == 1 && cb[0]) {
+	if (rctx->framebuffer.dual_src_blend && i == 1 && cb[0]) {
 		radeon_emit(cs, cb[0]->cb_color_info);
 		i++;
 	}
@@ -1550,7 +1543,7 @@ static void r600_emit_db_state(struct r600_context *rctx, struct r600_atom *atom
 		radeon_set_context_reg(cs, R_02802C_DB_DEPTH_CLEAR, fui(rtex->depth_clear_value));
 		radeon_set_context_reg(cs, R_028D24_DB_HTILE_SURFACE, a->rsurf->db_htile_surface);
 		radeon_set_context_reg(cs, R_028014_DB_HTILE_DATA_BASE, a->rsurf->db_htile_data_base);
-		reloc_idx = radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx, rtex->htile_buffer,
+		reloc_idx = radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx, &rtex->resource,
 						  RADEON_USAGE_READWRITE, RADEON_PRIO_HTILE);
 		radeon_emit(cs, PKT3(PKT3_NOP, 0, 0));
 		radeon_emit(cs, reloc_idx);
@@ -1665,7 +1658,7 @@ static void r600_emit_vertex_buffers(struct r600_context *rctx, struct r600_atom
 		unsigned buffer_index = u_bit_scan(&dirty_mask);
 
 		vb = &rctx->vertex_buffer_state.vb[buffer_index];
-		rbuffer = (struct r600_resource*)vb->buffer;
+		rbuffer = (struct r600_resource*)vb->buffer.resource;
 		assert(rbuffer);
 
 		offset = vb->buffer_offset;
@@ -1909,7 +1902,7 @@ static void r600_emit_vertex_fetch_shader(struct r600_context *rctx, struct r600
 	radeon_emit(cs, PKT3(PKT3_NOP, 0, 0));
 	radeon_emit(cs, radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx, shader->buffer,
                                                   RADEON_USAGE_READ,
-                                                  RADEON_PRIO_INTERNAL_SHADER));
+                                                  RADEON_PRIO_SHADER_BINARY));
 }
 
 static void r600_emit_shader_stages(struct r600_context *rctx, struct r600_atom *a)
@@ -1963,7 +1956,7 @@ static void r600_emit_gs_rings(struct r600_context *rctx, struct r600_atom *a)
 		radeon_emit(cs, PKT3(PKT3_NOP, 0, 0));
 		radeon_emit(cs, radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx, rbuffer,
 						      RADEON_USAGE_READWRITE,
-						      RADEON_PRIO_RINGS_STREAMOUT));
+						      RADEON_PRIO_SHADER_RINGS));
 		radeon_set_config_reg(cs, R_008C44_SQ_ESGS_RING_SIZE,
 				state->esgs_ring.buffer_size >> 8);
 
@@ -1972,7 +1965,7 @@ static void r600_emit_gs_rings(struct r600_context *rctx, struct r600_atom *a)
 		radeon_emit(cs, PKT3(PKT3_NOP, 0, 0));
 		radeon_emit(cs, radeon_add_to_buffer_list(&rctx->b, &rctx->b.gfx, rbuffer,
 						      RADEON_USAGE_READWRITE,
-						      RADEON_PRIO_RINGS_STREAMOUT));
+						      RADEON_PRIO_SHADER_RINGS));
 		radeon_set_config_reg(cs, R_008C4C_SQ_GSVS_RING_SIZE,
 				state->gsvs_ring.buffer_size >> 8);
 	} else {
@@ -2372,12 +2365,6 @@ void r600_init_atom_start_cs(struct r600_context *rctx)
 
 	r600_store_context_reg(cb, R_028820_PA_CL_NANINF_CNTL, 0);
 	r600_store_context_reg(cb, R_028A48_PA_SC_MPASS_PS_CNTL, 0);
-
-	r600_store_context_reg_seq(cb, R_0282D0_PA_SC_VPORT_ZMIN_0, 2 * R600_MAX_VIEWPORTS);
-	for (tmp = 0; tmp < R600_MAX_VIEWPORTS; tmp++) {
-		r600_store_value(cb, 0); /* R_0282D0_PA_SC_VPORT_ZMIN_0 */
-		r600_store_value(cb, fui(1.0)); /* R_0282D4_PA_SC_VPORT_ZMAX_0 */
-	}
 
 	r600_store_context_reg(cb, R_028200_PA_SC_WINDOW_OFFSET, 0);
 	r600_store_context_reg(cb, R_02820C_PA_SC_CLIPRECT_RULE, 0xFFFF);
@@ -2849,8 +2836,8 @@ static boolean r600_dma_copy_tile(struct r600_context *rctx,
 	unsigned ncopy, height, cheight, detile, i, x, y, z, src_mode, dst_mode;
 	uint64_t base, addr;
 
-	dst_mode = rdst->surface.level[dst_level].mode;
-	src_mode = rsrc->surface.level[src_level].mode;
+	dst_mode = rdst->surface.u.legacy.level[dst_level].mode;
+	src_mode = rsrc->surface.u.legacy.level[src_level].mode;
 	assert(dst_mode != src_mode);
 
 	y = 0;
@@ -2860,40 +2847,40 @@ static boolean r600_dma_copy_tile(struct r600_context *rctx,
 	if (dst_mode == RADEON_SURF_MODE_LINEAR_ALIGNED) {
 		/* T2L */
 		array_mode = r600_array_mode(src_mode);
-		slice_tile_max = (rsrc->surface.level[src_level].nblk_x * rsrc->surface.level[src_level].nblk_y) / (8*8);
+		slice_tile_max = (rsrc->surface.u.legacy.level[src_level].nblk_x * rsrc->surface.u.legacy.level[src_level].nblk_y) / (8*8);
 		slice_tile_max = slice_tile_max ? slice_tile_max - 1 : 0;
 		/* linear height must be the same as the slice tile max height, it's ok even
 		 * if the linear destination/source have smaller heigh as the size of the
 		 * dma packet will be using the copy_height which is always smaller or equal
 		 * to the linear height
 		 */
-		height = rsrc->surface.level[src_level].npix_y;
+		height = u_minify(rsrc->resource.b.b.height0, src_level);
 		detile = 1;
 		x = src_x;
 		y = src_y;
 		z = src_z;
-		base = rsrc->surface.level[src_level].offset;
-		addr = rdst->surface.level[dst_level].offset;
-		addr += rdst->surface.level[dst_level].slice_size * dst_z;
+		base = rsrc->surface.u.legacy.level[src_level].offset;
+		addr = rdst->surface.u.legacy.level[dst_level].offset;
+		addr += rdst->surface.u.legacy.level[dst_level].slice_size * dst_z;
 		addr += dst_y * pitch + dst_x * bpp;
 	} else {
 		/* L2T */
 		array_mode = r600_array_mode(dst_mode);
-		slice_tile_max = (rdst->surface.level[dst_level].nblk_x * rdst->surface.level[dst_level].nblk_y) / (8*8);
+		slice_tile_max = (rdst->surface.u.legacy.level[dst_level].nblk_x * rdst->surface.u.legacy.level[dst_level].nblk_y) / (8*8);
 		slice_tile_max = slice_tile_max ? slice_tile_max - 1 : 0;
 		/* linear height must be the same as the slice tile max height, it's ok even
 		 * if the linear destination/source have smaller heigh as the size of the
 		 * dma packet will be using the copy_height which is always smaller or equal
 		 * to the linear height
 		 */
-		height = rdst->surface.level[dst_level].npix_y;
+		height = u_minify(rdst->resource.b.b.height0, dst_level);
 		detile = 0;
 		x = dst_x;
 		y = dst_y;
 		z = dst_z;
-		base = rdst->surface.level[dst_level].offset;
-		addr = rsrc->surface.level[src_level].offset;
-		addr += rsrc->surface.level[src_level].slice_size * src_z;
+		base = rdst->surface.u.legacy.level[dst_level].offset;
+		addr = rsrc->surface.u.legacy.level[src_level].offset;
+		addr += rsrc->surface.u.legacy.level[src_level].slice_size * src_z;
 		addr += src_y * pitch + src_x * bpp;
 	}
 	/* check that we are in dw/base alignment constraint */
@@ -2929,7 +2916,6 @@ static boolean r600_dma_copy_tile(struct r600_context *rctx,
 		addr += cheight * pitch;
 		y += cheight;
 	}
-	r600_dma_emit_wait_idle(&rctx->b);
 	return TRUE;
 }
 
@@ -2972,14 +2958,14 @@ static void r600_dma_copy(struct pipe_context *ctx,
 	dst_y = util_format_get_nblocksy(src->format, dst_y);
 
 	bpp = rdst->surface.bpe;
-	dst_pitch = rdst->surface.level[dst_level].pitch_bytes;
-	src_pitch = rsrc->surface.level[src_level].pitch_bytes;
-	src_w = rsrc->surface.level[src_level].npix_x;
-	dst_w = rdst->surface.level[dst_level].npix_x;
+	dst_pitch = rdst->surface.u.legacy.level[dst_level].nblk_x * rdst->surface.bpe;
+	src_pitch = rsrc->surface.u.legacy.level[src_level].nblk_x * rsrc->surface.bpe;
+	src_w = u_minify(rsrc->resource.b.b.width0, src_level);
+	dst_w = u_minify(rdst->resource.b.b.width0, dst_level);
 	copy_height = src_box->height / rsrc->surface.blk_h;
 
-	dst_mode = rdst->surface.level[dst_level].mode;
-	src_mode = rsrc->surface.level[src_level].mode;
+	dst_mode = rdst->surface.u.legacy.level[dst_level].mode;
+	src_mode = rsrc->surface.u.legacy.level[src_level].mode;
 
 	if (src_pitch != dst_pitch || src_box->x || dst_x || src_w != dst_w) {
 		/* strict requirement on r6xx/r7xx */
@@ -2998,11 +2984,11 @@ static void r600_dma_copy(struct pipe_context *ctx,
 		 *   dst_x/y == 0
 		 *   dst_pitch == src_pitch
 		 */
-		src_offset= rsrc->surface.level[src_level].offset;
-		src_offset += rsrc->surface.level[src_level].slice_size * src_box->z;
+		src_offset= rsrc->surface.u.legacy.level[src_level].offset;
+		src_offset += rsrc->surface.u.legacy.level[src_level].slice_size * src_box->z;
 		src_offset += src_y * src_pitch + src_x * bpp;
-		dst_offset = rdst->surface.level[dst_level].offset;
-		dst_offset += rdst->surface.level[dst_level].slice_size * dst_z;
+		dst_offset = rdst->surface.u.legacy.level[dst_level].offset;
+		dst_offset += rdst->surface.u.legacy.level[dst_level].slice_size * dst_z;
 		dst_offset += dst_y * dst_pitch + dst_x * bpp;
 		size = src_box->height * src_pitch;
 		/* must be dw aligned */

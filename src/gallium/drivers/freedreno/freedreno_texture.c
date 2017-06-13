@@ -86,49 +86,26 @@ static void set_sampler_views(struct fd_texture_stateobj *tex,
 
 void
 fd_sampler_states_bind(struct pipe_context *pctx,
-		unsigned shader, unsigned start,
+		enum pipe_shader_type shader, unsigned start,
 		unsigned nr, void **hwcso)
 {
 	struct fd_context *ctx = fd_context(pctx);
 
-	if (shader == PIPE_SHADER_FRAGMENT) {
-		bind_sampler_states(&ctx->fragtex, start, nr, hwcso);
-		ctx->dirty |= FD_DIRTY_FRAGTEX;
-	}
-	else if (shader == PIPE_SHADER_VERTEX) {
-		bind_sampler_states(&ctx->verttex, start, nr, hwcso);
-		ctx->dirty |= FD_DIRTY_VERTTEX;
-	}
+	bind_sampler_states(&ctx->tex[shader], start, nr, hwcso);
+	ctx->dirty_shader[shader] |= FD_DIRTY_SHADER_TEX;
+	ctx->dirty |= FD_DIRTY_TEX;
 }
 
 void
-fd_set_sampler_views(struct pipe_context *pctx, unsigned shader,
+fd_set_sampler_views(struct pipe_context *pctx, enum pipe_shader_type shader,
 		unsigned start, unsigned nr,
 		struct pipe_sampler_view **views)
 {
 	struct fd_context *ctx = fd_context(pctx);
 
-	switch (shader) {
-	case PIPE_SHADER_FRAGMENT:
-		/* on a2xx, since there is a flat address space for textures/samplers,
-		 * a change in # of fragment textures/samplers will trigger patching
-		 * and re-emitting the vertex shader:
-		 *
-		 * (note: later gen's ignore FD_DIRTY_TEXSTATE so fine to set it)
-		 */
-		if (nr != ctx->fragtex.num_textures)
-			ctx->dirty |= FD_DIRTY_TEXSTATE;
-
-		set_sampler_views(&ctx->fragtex, start, nr, views);
-		ctx->dirty |= FD_DIRTY_FRAGTEX;
-		break;
-	case PIPE_SHADER_VERTEX:
-		set_sampler_views(&ctx->verttex, start, nr, views);
-		ctx->dirty |= FD_DIRTY_VERTTEX;
-		break;
-	default:
-		break;
-	}
+	set_sampler_views(&ctx->tex[shader], start, nr, views);
+	ctx->dirty_shader[shader] |= FD_DIRTY_SHADER_TEX;
+	ctx->dirty |= FD_DIRTY_TEX;
 }
 
 void

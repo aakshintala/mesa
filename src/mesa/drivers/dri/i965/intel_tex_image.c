@@ -29,6 +29,22 @@
 
 #define FILE_DEBUG_FLAG DEBUG_TEXTURE
 
+/* Make sure one doesn't end up shrinking base level zero unnecessarily.
+ * Determining the base level dimension by shifting higher level dimension
+ * ends up in off-by-one value in case base level has NPOT size (for example,
+ * 293 != 146 << 1).
+ * Choose the original base level dimension when shifted dimensions agree.
+ * Otherwise assume real resize is intended and use the new shifted value.
+ */
+static unsigned 
+get_base_dim(unsigned old_base_dim, unsigned new_level_dim, unsigned level)
+{
+   const unsigned old_level_dim = old_base_dim >> level;
+   const unsigned new_base_dim = new_level_dim << level;
+
+   return old_level_dim == new_level_dim ? old_base_dim : new_base_dim;
+}
+
 /* Work back from the specified level of the image to the baselevel and create a
  * miptree of that size.
  */
@@ -40,19 +56,39 @@ intel_miptree_create_for_teximage(struct brw_context *brw,
 {
    GLuint lastLevel;
    int width, height, depth;
-   GLuint i;
+   const struct intel_mipmap_tree *old_mt = intelObj->mt;
+   const unsigned level = intelImage->base.Base.Level;
 
    intel_get_image_dims(&intelImage->base.Base, &width, &height, &depth);
 
    DBG("%s\n", __func__);
 
    /* Figure out image dimensions at start level. */
-   for (i = intelImage->base.Base.Level; i > 0; i--) {
-      width <<= 1;
-      if (height != 1)
-         height <<= 1;
-      if (intelObj->base.Target == GL_TEXTURE_3D)
-         depth <<= 1;
+   switch(intelObj->base.Target) {
+   case GL_TEXTURE_2D_MULTISAMPLE:
+   case GL_TEXTURE_2D_MULTISAMPLE_ARRAY:
+   case GL_TEXTURE_RECTANGLE:
+   case GL_TEXTURE_EXTERNAL_OES:
+      assert(level == 0);
+      break;
+   case GL_TEXTURE_3D:
+      depth = old_mt ? get_base_dim(old_mt->logical_depth0, depth, level) :
+                       depth << level;
+      /* Fall through */
+   case GL_TEXTURE_2D:
+   case GL_TEXTURE_2D_ARRAY:
+   case GL_TEXTURE_CUBE_MAP:
+   case GL_TEXTURE_CUBE_MAP_ARRAY:
+      height = old_mt ? get_base_dim(old_mt->logical_height0, height, level) :
+                        height << level;
+      /* Fall through */
+   case GL_TEXTURE_1D:
+   case GL_TEXTURE_1D_ARRAY:
+      width = old_mt ? get_base_dim(old_mt->logical_width0, width, level) :
+                       width << level;
+      break;
+   default:
+      unreachable("Unexpected target");
    }
 
    /* Guess a reasonable value for lastLevel.  This is probably going
@@ -92,7 +128,7 @@ intelTexImage(struct gl_context * ctx,
    struct intel_texture_image *intelImage = intel_texture_image(texImage);
    bool ok;
 
-   bool tex_busy = intelImage->mt && drm_intel_bo_busy(intelImage->mt->bo);
+   bool tex_busy = intelImage->mt && brw_bo_busy(intelImage->mt->bo);
 
    DBG("%s mesa_format %s target %s format %s type %s level %d %dx%dx%d\n",
        __func__, _mesa_get_format_name(texImage->TexFormat),
@@ -107,6 +143,9 @@ intelTexImage(struct gl_context * ctx,
    }
 
    assert(intelImage->mt);
+
+   if (intelImage->mt->format == MESA_FORMAT_S_UINT8)
+      intelImage->mt->r8stencil_needs_update = true;
 
    ok = _mesa_meta_pbo_TexSubImage(ctx, dims, texImage, 0, 0, 0,
                                    texImage->Width, texImage->Height,
@@ -212,8 +251,12 @@ static struct intel_mipmap_tree *
 create_mt_for_dri_image(struct brw_context *brw,
                         GLenum target, __DRIimage *image)
 {
+   struct gl_context *ctx = &brw->ctx;
    struct intel_mipmap_tree *mt;
    uint32_t draw_x, draw_y;
+
+   if (!ctx->TextureFormatSupported[image->format])
+      return NULL;
 
    /* Disable creation of the texture's aux buffers because the driver exposes
     * no EGL API to manage them. That is, there is no API for resolving the aux
@@ -366,12 +409,11 @@ intel_image_target_texture_2d(struct gl_context *ctx, GLenum target,
 {
    struct brw_context *brw = brw_context(ctx);
    struct intel_mipmap_tree *mt;
-   __DRIscreen *screen;
+   __DRIscreen *dri_screen = brw->screen->driScrnPriv;
    __DRIimage *image;
 
-   screen = brw->intelScreen->driScrnPriv;
-   image = screen->dri2.image->lookupEGLImage(screen, image_handle,
-					      screen->loaderPrivate);
+   image = dri_screen->dri2.image->lookupEGLImage(dri_screen, image_handle,
+                                                  dri_screen->loaderPrivate);
    if (image == NULL)
       return;
 
@@ -429,9 +471,7 @@ intel_gettexsubimage_tiled_memcpy(struct gl_context *ctx,
    int dst_pitch;
 
    /* The miptree's buffer. */
-   drm_intel_bo *bo;
-
-   int error = 0;
+   struct brw_bo *bo;
 
    uint32_t cpp;
    mem_copy_fn mem_copy = NULL;
@@ -482,20 +522,34 @@ intel_gettexsubimage_tiled_memcpy(struct gl_context *ctx,
       return false;
    }
 
+   /* tiled_to_linear() assumes that if the object is swizzled, it is using
+    * I915_BIT6_SWIZZLE_9_10 for X and I915_BIT6_SWIZZLE_9 for Y.  This is only
+    * true on gen5 and above.
+    *
+    * The killer on top is that some gen4 have an L-shaped swizzle mode, where
+    * parts of the memory aren't swizzled at all. Userspace just can't handle
+    * that.
+    */
+   if (brw->gen < 5 && brw->has_swizzling)
+      return false;
+
+   int level = texImage->Level + texImage->TexObject->MinLevel;
+
    /* Since we are going to write raw data to the miptree, we need to resolve
     * any pending fast color clears before we start.
     */
-   intel_miptree_resolve_color(brw, image->mt, 0);
+   assert(image->mt->logical_depth0 == 1);
+   intel_miptree_access_raw(brw, image->mt, level, 0, true);
 
    bo = image->mt->bo;
 
-   if (drm_intel_bo_references(brw->batch.bo, bo)) {
+   if (brw_batch_references(&brw->batch, bo)) {
       perf_debug("Flushing before mapping a referenced bo.\n");
       intel_batchbuffer_flush(brw);
    }
 
-   error = brw_bo_map(brw, bo, false /* write enable */, "miptree");
-   if (error) {
+   void *map = brw_bo_map(brw, bo, MAP_READ | MAP_RAW);
+   if (map == NULL) {
       DBG("%s: failed to map bo\n", __func__);
       return false;
    }
@@ -510,8 +564,6 @@ intel_gettexsubimage_tiled_memcpy(struct gl_context *ctx,
        packing->Alignment, packing->RowLength, packing->SkipPixels,
        packing->SkipRows);
 
-   int level = texImage->Level + texImage->TexObject->MinLevel;
-
    /* Adjust x and y offset based on miplevel */
    xoffset += image->mt->level[level].level_x;
    yoffset += image->mt->level[level].level_y;
@@ -520,14 +572,14 @@ intel_gettexsubimage_tiled_memcpy(struct gl_context *ctx,
       xoffset * cpp, (xoffset + width) * cpp,
       yoffset, yoffset + height,
       pixels - (ptrdiff_t) yoffset * dst_pitch - (ptrdiff_t) xoffset * cpp,
-      bo->virtual,
+      map,
       dst_pitch, image->mt->pitch,
       brw->has_swizzling,
       image->mt->tiling,
       mem_copy
    );
 
-   drm_intel_bo_unmap(bo);
+   brw_bo_unmap(bo);
    return true;
 }
 

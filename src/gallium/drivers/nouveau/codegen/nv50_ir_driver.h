@@ -54,11 +54,6 @@ struct nv50_ir_varying
    ubyte si; /* TGSI semantic index */
 };
 
-#define NV50_PROGRAM_IR_TGSI 0
-#define NV50_PROGRAM_IR_SM4  1
-#define NV50_PROGRAM_IR_GLSL 2
-#define NV50_PROGRAM_IR_LLVM 3
-
 #ifdef DEBUG
 # define NV50_IR_DEBUG_BASIC     (1 << 0)
 # define NV50_IR_DEBUG_VERBOSE   (2 << 0)
@@ -75,8 +70,6 @@ struct nv50_ir_prog_symbol
    uint32_t offset;
 };
 
-#define NVISA_GF100_CHIPSET_C0 0xc0
-#define NVISA_GF100_CHIPSET_D0 0xd0
 #define NVISA_GK104_CHIPSET    0xe0
 #define NVISA_GK20A_CHIPSET    0xea
 #define NVISA_GM107_CHIPSET    0x110
@@ -97,7 +90,7 @@ struct nv50_ir_prog_info
       uint32_t *code;
       uint32_t codeSize;
       uint32_t instructions;
-      uint8_t sourceRep;  /* NV50_PROGRAM_IR */
+      uint8_t sourceRep;  /* PIPE_SHADER_IR_* */
       const void *source;
       void *relocData;
       void *fixupData;
@@ -144,16 +137,18 @@ struct nv50_ir_prog_info
          unsigned numColourResults;
          bool writesDepth;
          bool earlyFragTests;
+         bool postDepthCoverage;
          bool separateFragData;
          bool usesDiscard;
          bool persampleInvocation;
          bool usesSampleMaskIn;
+         bool readsFramebuffer;
       } fp;
       struct {
          uint32_t inputOffset; /* base address for user args */
          uint32_t sharedOffset; /* reserved space in s[] */
          uint32_t gridInfoBase;  /* base address for NTID,NCTAID */
-         uint32_t numThreads; /* max number of threads */
+         uint16_t numThreads[3]; /* max number of threads */
       } cp;
    } prop;
 
@@ -166,6 +161,7 @@ struct nv50_ir_prog_info
       uint8_t auxCBSlot;         /* driver constant buffer slot */
       uint16_t ucpBase;          /* base address for UCPs */
       uint16_t drawInfoBase;     /* base address for draw parameters */
+      uint16_t alphaRefBase;     /* base address for alpha test values */
       uint8_t pointSize;         /* output index for PointSize */
       uint8_t instanceId;        /* system value index of InstanceID */
       uint8_t vertexId;          /* system value index of VertexID */
@@ -177,8 +173,10 @@ struct nv50_ir_prog_info
       uint8_t backFaceColor[2];  /* input/output indices of back face colour */
       uint8_t globalAccess;      /* 1 for read, 2 for wr, 3 for rw */
       bool fp64;                 /* program uses fp64 math */
+      bool mul_zero_wins;        /* program wants for x*0 = 0 */
       bool nv50styleSurfaces;    /* generate gX[] access for raw buffers */
       uint16_t texBindBase;      /* base address for tex handles (nve4) */
+      uint16_t fbtexBindBase;    /* base address for fbtex handle (nve4) */
       uint16_t suInfoBase;       /* base address for surface info (nve4) */
       uint16_t bufInfoBase;      /* base address for buffer info */
       uint16_t sampleInfoBase;   /* base address for sample positions */
@@ -206,7 +204,8 @@ extern void nv50_ir_relocate_code(void *relocData, uint32_t *code,
 
 extern void
 nv50_ir_apply_fixups(void *fixupData, uint32_t *code,
-                     bool force_per_sample, bool flatshade);
+                     bool force_per_sample, bool flatshade,
+                     uint8_t alphatest);
 
 /* obtain code that will be shared among programs */
 extern void nv50_ir_get_target_library(uint32_t chipset,

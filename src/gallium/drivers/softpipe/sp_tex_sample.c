@@ -796,23 +796,6 @@ get_texel_quad_2d_no_border(const struct sp_sampler_view *sp_sview,
    out[3] = get_texel_2d_no_border( sp_sview, addr, x1, y1 );
 }
 
-/* Can involve a lot of unnecessary checks for border color:
- */
-static inline void
-get_texel_quad_2d(const struct sp_sampler_view *sp_sview,
-                  const struct sp_sampler *sp_samp,
-                  union tex_tile_address addr,
-                  int x0, int y0,
-                  int x1, int y1,
-                  const float *out[4])
-{
-   out[0] = get_texel_2d( sp_sview, sp_samp, addr, x0, y0 );
-   out[1] = get_texel_2d( sp_sview, sp_samp, addr, x1, y0 );
-   out[3] = get_texel_2d( sp_sview, sp_samp, addr, x1, y1 );
-   out[2] = get_texel_2d( sp_sview, sp_samp, addr, x0, y1 );
-}
-
-
 
 /* 3d variants:
  */
@@ -3192,7 +3175,7 @@ sp_get_dims(const struct sp_sampler_view *sp_sview,
    const struct pipe_resource *texture = view->texture;
 
    if (view->target == PIPE_BUFFER) {
-      dims[0] = (view->u.buf.last_element - view->u.buf.first_element) + 1;
+      dims[0] = view->u.buf.size / util_format_get_blocksize(view->format);
       /* the other values are undefined, but let's avoid potential valgrind
        * warnings.
        */
@@ -3264,17 +3247,22 @@ sp_get_texels(const struct sp_sampler_view *sp_sview,
    const int width = u_minify(texture->width0, level);
    const int height = u_minify(texture->height0, level);
    const int depth = u_minify(texture->depth0, level);
+   unsigned elem_size, first_element, last_element;
 
    addr.value = 0;
    addr.bits.level = level;
 
    switch (sp_sview->base.target) {
    case PIPE_BUFFER:
+      elem_size = util_format_get_blocksize(sp_sview->base.format);
+      first_element = sp_sview->base.u.buf.offset / elem_size;
+      last_element = (sp_sview->base.u.buf.offset +
+                      sp_sview->base.u.buf.size) / elem_size - 1;
       for (j = 0; j < TGSI_QUAD_SIZE; j++) {
          const int x = CLAMP(v_i[j] + offset[0] +
-                             sp_sview->base.u.buf.first_element,
-                             sp_sview->base.u.buf.first_element,
-                             sp_sview->base.u.buf.last_element);
+                             first_element,
+                             first_element,
+                             last_element);
          tx = get_texel_2d_no_border(sp_sview, addr, x, 0);
          for (c = 0; c < 4; c++) {
             rgba[c][j] = tx[c];
@@ -3438,7 +3426,8 @@ softpipe_create_sampler_state(struct pipe_context *pipe,
 
 
 compute_lambda_func
-softpipe_get_lambda_func(const struct pipe_sampler_view *view, unsigned shader)
+softpipe_get_lambda_func(const struct pipe_sampler_view *view,
+                         enum pipe_shader_type shader)
 {
    if (shader != PIPE_SHADER_FRAGMENT)
       return compute_lambda_vert;

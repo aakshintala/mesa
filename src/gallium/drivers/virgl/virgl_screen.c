@@ -27,7 +27,6 @@
 #include "os/os_time.h"
 #include "pipe/p_defines.h"
 #include "pipe/p_screen.h"
-#include "draw/draw_context.h"
 
 #include "tgsi/tgsi_exec.h"
 
@@ -142,12 +141,12 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
       return 0;
    case PIPE_CAP_USER_VERTEX_BUFFERS:
       return 0;
-   case PIPE_CAP_USER_INDEX_BUFFERS:
    case PIPE_CAP_USER_CONSTANT_BUFFERS:
       return 1;
    case PIPE_CAP_CONSTANT_BUFFER_OFFSET_ALIGNMENT:
       return 16;
    case PIPE_CAP_STREAM_OUTPUT_PAUSE_RESUME:
+   case PIPE_CAP_STREAM_OUTPUT_INTERLEAVE_BUFFERS:
       return vscreen->caps.caps.v1.bset.streamout_pause_resume;
    case PIPE_CAP_START_INSTANCE:
       return vscreen->caps.caps.v1.bset.start_instance;
@@ -184,6 +183,7 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
    case PIPE_CAP_ENDIANNESS:
       return 0;
    case PIPE_CAP_MIXED_FRAMEBUFFER_SIZES:
+   case PIPE_CAP_MIXED_COLOR_DEPTH_BITS:
       return 1;
    case PIPE_CAP_TGSI_VS_LAYER_VIEWPORT:
       return 0;
@@ -246,6 +246,24 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
    case PIPE_CAP_TGSI_VOTE:
    case PIPE_CAP_MAX_WINDOW_RECTANGLES:
    case PIPE_CAP_POLYGON_OFFSET_UNITS_UNSCALED:
+   case PIPE_CAP_VIEWPORT_SUBPIXEL_BITS:
+   case PIPE_CAP_TGSI_ARRAY_COMPONENTS:
+   case PIPE_CAP_TGSI_CAN_READ_OUTPUTS:
+   case PIPE_CAP_GLSL_OPTIMIZE_CONSERVATIVELY:
+   case PIPE_CAP_TGSI_FS_FBFETCH:
+   case PIPE_CAP_TGSI_MUL_ZERO_WINS:
+   case PIPE_CAP_INT64:
+   case PIPE_CAP_INT64_DIVMOD:
+   case PIPE_CAP_TGSI_TEX_TXF_LZ:
+   case PIPE_CAP_TGSI_CLOCK:
+   case PIPE_CAP_POLYGON_MODE_FILL_RECTANGLE:
+   case PIPE_CAP_SPARSE_BUFFER_PAGE_SIZE:
+   case PIPE_CAP_TGSI_BALLOT:
+   case PIPE_CAP_DOUBLES:
+   case PIPE_CAP_TGSI_TES_LAYER_VIEWPORT:
+   case PIPE_CAP_CAN_BIND_CONST_BUFFER_AS_VERTEX:
+   case PIPE_CAP_ALLOW_MAPPED_BUFFERS_DURING_EXECUTION:
+   case PIPE_CAP_POST_DEPTH_COVERAGE:
       return 0;
    case PIPE_CAP_VENDOR_ID:
       return 0x1af4;
@@ -256,6 +274,8 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
    case PIPE_CAP_UMA:
    case PIPE_CAP_VIDEO_MEMORY:
       return 0;
+   case PIPE_CAP_NATIVE_FENCE_FD:
+      return 0;
    }
    /* should only get here on unhandled cases */
    debug_printf("Unexpected PIPE_CAP %d query\n", param);
@@ -263,7 +283,9 @@ virgl_get_param(struct pipe_screen *screen, enum pipe_cap param)
 }
 
 static int
-virgl_get_shader_param(struct pipe_screen *screen, unsigned shader, enum pipe_shader_cap param)
+virgl_get_shader_param(struct pipe_screen *screen,
+                       enum pipe_shader_type shader,
+                       enum pipe_shader_cap param)
 {
    struct virgl_screen *vscreen = virgl_screen(screen);
    switch(shader)
@@ -296,8 +318,6 @@ virgl_get_shader_param(struct pipe_screen *screen, unsigned shader, enum pipe_sh
          return vscreen->caps.caps.v1.max_uniform_blocks;
     //  case PIPE_SHADER_CAP_MAX_ADDRS:
      //    return 1;
-      case PIPE_SHADER_CAP_MAX_PREDS:
-         return 0;
       case PIPE_SHADER_CAP_SUBROUTINES:
          return 1;
       case PIPE_SHADER_CAP_MAX_TEXTURE_SAMPLERS:
@@ -308,6 +328,8 @@ virgl_get_shader_param(struct pipe_screen *screen, unsigned shader, enum pipe_sh
          return 32;
       case PIPE_SHADER_CAP_MAX_CONST_BUFFER_SIZE:
          return 4096 * sizeof(float[4]);
+      case PIPE_SHADER_CAP_LOWER_IF_THRESHOLD:
+      case PIPE_SHADER_CAP_TGSI_SKIP_MERGE_REGISTERS:
       default:
          return 0;
       }
@@ -523,6 +545,7 @@ static void virgl_fence_reference(struct pipe_screen *screen,
 }
 
 static boolean virgl_fence_finish(struct pipe_screen *screen,
+                                  struct pipe_context *ctx,
                                   struct pipe_fence_handle *fence,
                                   uint64_t timeout)
 {
@@ -543,6 +566,8 @@ virgl_destroy_screen(struct pipe_screen *screen)
 {
    struct virgl_screen *vscreen = virgl_screen(screen);
    struct virgl_winsys *vws = vscreen->vws;
+
+   slab_destroy_parent(&vscreen->texture_transfer_pool);
 
    if (vws)
       vws->destroy(vws);
@@ -577,6 +602,8 @@ virgl_create_screen(struct virgl_winsys *vws)
    vws->get_caps(vws, &screen->caps);
 
    screen->refcnt = 1;
+
+   slab_create_parent(&screen->texture_transfer_pool, sizeof(struct virgl_transfer), 16);
 
    util_format_s3tc_init();
    return &screen->base;

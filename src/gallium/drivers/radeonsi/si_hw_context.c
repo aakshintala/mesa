@@ -25,27 +25,28 @@
  */
 
 #include "si_pipe.h"
+#include "radeon/r600_cs.h"
 
 static unsigned si_descriptor_list_cs_space(unsigned count, unsigned element_size)
 {
 	/* Ensure we have enough space to start a new range in a hole */
 	assert(element_size >= 3);
 
-	/* 5 dwords for possible load to reinitialize when we have no preamble
-	 * IB + 5 dwords for write to L2 + 3 bytes for every range written to
-	 * CE RAM.
+	/* 5 dwords for write to L2 + 3 bytes for the packet header of
+	 * every disjoint range written to CE RAM.
 	 */
-	return 5 + 5 + 3 + count * element_size;
+	return 5 + (3 * count / 2) + count * element_size;
 }
 
 static unsigned si_ce_needed_cs_space(void)
 {
 	unsigned space = 0;
 
-	space += si_descriptor_list_cs_space(SI_NUM_CONST_BUFFERS, 4);
-	space += si_descriptor_list_cs_space(SI_NUM_SHADER_BUFFERS, 4);
-	space += si_descriptor_list_cs_space(SI_NUM_SAMPLERS, 16);
-	space += si_descriptor_list_cs_space(SI_NUM_IMAGES, 8);
+	space += si_descriptor_list_cs_space(SI_NUM_SHADER_BUFFERS +
+					     SI_NUM_CONST_BUFFERS, 4);
+	/* two 8-byte images share one 16-byte slot */
+	space += si_descriptor_list_cs_space(SI_NUM_IMAGES / 2 +
+					     SI_NUM_SAMPLERS, 16);
 	space *= SI_NUM_SHADERS;
 
 	space += si_descriptor_list_cs_space(SI_NUM_RW_BUFFERS, 4);
@@ -61,18 +62,20 @@ void si_need_cs_space(struct si_context *ctx)
 {
 	struct radeon_winsys_cs *cs = ctx->b.gfx.cs;
 	struct radeon_winsys_cs *ce_ib = ctx->ce_ib;
-	struct radeon_winsys_cs *dma = ctx->b.dma.cs;
 
-	/* Flush the DMA IB if it's not empty. */
-	if (radeon_emitted(dma, 0))
-		ctx->b.dma.flush(ctx, RADEON_FLUSH_ASYNC, NULL);
+	/* There is no need to flush the DMA IB here, because
+	 * r600_need_dma_space always flushes the GFX IB if there is
+	 * a conflict, which means any unflushed DMA commands automatically
+	 * precede the GFX IB (= they had no dependency on the GFX IB when
+	 * they were submitted).
+	 */
 
 	/* There are two memory usage counters in the winsys for all buffers
 	 * that have been added (cs_add_buffer) and two counters in the pipe
 	 * driver for those that haven't been added yet.
 	 */
-	if (unlikely(!ctx->b.ws->cs_memory_below_limit(ctx->b.gfx.cs,
-						       ctx->b.vram, ctx->b.gtt))) {
+	if (unlikely(!radeon_cs_memory_below_limit(ctx->b.screen, ctx->b.gfx.cs,
+						   ctx->b.vram, ctx->b.gtt))) {
 		ctx->b.gtt = 0;
 		ctx->b.vram = 0;
 		ctx->b.gfx.flush(ctx, RADEON_FLUSH_ASYNC, NULL);
@@ -99,17 +102,30 @@ void si_context_gfx_flush(void *context, unsigned flags,
 	if (ctx->gfx_flush_in_progress)
 		return;
 
+	if (!radeon_emitted(cs, ctx->b.initial_gfx_cs_size))
+		return;
+
+	if (r600_check_device_reset(&ctx->b))
+		return;
+
+	if (ctx->screen->b.debug_flags & DBG_CHECK_VM)
+		flags &= ~RADEON_FLUSH_ASYNC;
+
+	/* If the state tracker is flushing the GFX IB, r600_flush_from_st is
+	 * responsible for flushing the DMA IB and merging the fences from both.
+	 * This code is only needed when the driver flushes the GFX IB
+	 * internally, and it never asks for a fence handle.
+	 */
+	if (radeon_emitted(ctx->b.dma.cs, 0)) {
+		assert(fence == NULL); /* internal flushes only */
+		ctx->b.dma.flush(ctx, flags, NULL);
+	}
+
 	ctx->gfx_flush_in_progress = true;
 
-	if (!radeon_emitted(cs, ctx->b.initial_gfx_cs_size) &&
-	    (!fence || ctx->last_gfx_fence)) {
-		if (fence)
-			ws->fence_reference(fence, ctx->last_gfx_fence);
-		if (!(flags & RADEON_FLUSH_ASYNC))
-			ws->cs_sync_flush(cs);
-		ctx->gfx_flush_in_progress = false;
-		return;
-	}
+	/* This CE dump should be done in parallel with the last draw. */
+	if (ctx->ce_ib)
+		si_ce_save_all_descriptors_at_ib_end(ctx);
 
 	r600_preflush_suspend_features(&ctx->b);
 
@@ -121,10 +137,7 @@ void si_context_gfx_flush(void *context, unsigned flags,
 		ctx->b.flags |= SI_CONTEXT_INV_GLOBAL_L2 |
 				SI_CONTEXT_INV_VMEM_L1;
 
-	si_emit_cache_flush(ctx, NULL);
-
-	/* force to keep tiling flags */
-	flags |= RADEON_FLUSH_KEEP_TILING_FLAGS;
+	si_emit_cache_flush(ctx);
 
 	if (ctx->trace_buf)
 		si_trace_emit(ctx);
@@ -138,17 +151,17 @@ void si_context_gfx_flush(void *context, unsigned flags,
 	}
 
 	/* Flush the CS. */
-	ws->cs_flush(cs, flags, &ctx->last_gfx_fence);
-
+	ws->cs_flush(cs, flags, &ctx->b.last_gfx_fence);
 	if (fence)
-		ws->fence_reference(fence, ctx->last_gfx_fence);
+		ws->fence_reference(fence, ctx->b.last_gfx_fence);
+	ctx->b.num_gfx_cs_flushes++;
 
 	/* Check VM faults if needed. */
 	if (ctx->screen->b.debug_flags & DBG_CHECK_VM) {
 		/* Use conservative timeout 800ms, after which we won't wait any
 		 * longer and assume the GPU is hung.
 		 */
-		ctx->b.ws->fence_wait(ctx->b.ws, ctx->last_gfx_fence, 800*1000*1000);
+		ctx->b.ws->fence_wait(ctx->b.ws, ctx->b.last_gfx_fence, 800*1000*1000);
 
 		si_check_vm_faults(&ctx->b, &ctx->last_gfx, RING_GFX);
 	}
@@ -165,7 +178,7 @@ void si_begin_new_cs(struct si_context *ctx)
 		/* Create a buffer used for writing trace IDs and initialize it to 0. */
 		assert(!ctx->trace_buf);
 		ctx->trace_buf = (struct r600_resource*)
-				 pipe_buffer_create(ctx->b.b.screen, PIPE_BIND_CUSTOM,
+				 pipe_buffer_create(ctx->b.b.screen, 0,
 						    PIPE_USAGE_STAGING, 4);
 		if (ctx->trace_buf)
 			pipe_buffer_write_nooverlap(&ctx->b.b, &ctx->trace_buf->b.b,
@@ -198,8 +211,11 @@ void si_begin_new_cs(struct si_context *ctx)
 	else if (ctx->ce_ib)
 		si_ce_enable_loads(ctx->ce_ib);
 
-	if (ctx->ce_preamble_ib)
-		si_ce_reinitialize_all_descriptors(ctx);
+	if (ctx->ce_ib)
+		si_ce_restore_all_descriptors_at_ib_start(ctx);
+
+	if (ctx->b.chip_class >= CIK)
+		si_mark_atom_dirty(ctx, &ctx->prefetch_L2);
 
 	ctx->framebuffer.dirty_cbufs = (1 << 8) - 1;
 	ctx->framebuffer.dirty_zsbuf = true;
@@ -207,7 +223,8 @@ void si_begin_new_cs(struct si_context *ctx)
 
 	si_mark_atom_dirty(ctx, &ctx->clip_regs);
 	si_mark_atom_dirty(ctx, &ctx->clip_state.atom);
-	si_mark_atom_dirty(ctx, &ctx->msaa_sample_locs);
+	ctx->msaa_sample_locs.nr_samples = 0;
+	si_mark_atom_dirty(ctx, &ctx->msaa_sample_locs.atom);
 	si_mark_atom_dirty(ctx, &ctx->msaa_config);
 	si_mark_atom_dirty(ctx, &ctx->sample_mask.atom);
 	si_mark_atom_dirty(ctx, &ctx->cb_render_state);
@@ -221,8 +238,15 @@ void si_begin_new_cs(struct si_context *ctx)
 
 	ctx->b.scissors.dirty_mask = (1 << R600_MAX_VIEWPORTS) - 1;
 	ctx->b.viewports.dirty_mask = (1 << R600_MAX_VIEWPORTS) - 1;
+	ctx->b.viewports.depth_range_dirty_mask = (1 << R600_MAX_VIEWPORTS) - 1;
 	si_mark_atom_dirty(ctx, &ctx->b.scissors.atom);
 	si_mark_atom_dirty(ctx, &ctx->b.viewports.atom);
+
+	si_mark_atom_dirty(ctx, &ctx->scratch_state);
+	if (ctx->scratch_buffer) {
+		r600_context_add_resource_size(&ctx->b.b,
+					       &ctx->scratch_buffer->b.b);
+	}
 
 	r600_postflush_resume_features(&ctx->b);
 
@@ -232,16 +256,15 @@ void si_begin_new_cs(struct si_context *ctx)
 	/* Invalidate various draw states so that they are emitted before
 	 * the first draw call. */
 	si_invalidate_draw_sh_constants(ctx);
+	ctx->last_index_size = -1;
 	ctx->last_primitive_restart_en = -1;
 	ctx->last_restart_index = SI_RESTART_INDEX_UNKNOWN;
 	ctx->last_gs_out_prim = -1;
 	ctx->last_prim = -1;
 	ctx->last_multi_vgt_param = -1;
-	ctx->last_ls_hs_config = -1;
 	ctx->last_rast_prim = -1;
 	ctx->last_sc_line_stipple = ~0;
-	ctx->last_vtx_reuse_depth = -1;
-	ctx->emit_scratch_reloc = true;
+	ctx->last_vs_state = ~0;
 	ctx->last_ls = NULL;
 	ctx->last_tcs = NULL;
 	ctx->last_tes_sh_base = -1;

@@ -387,13 +387,13 @@ _is_target_supported(struct gl_context *ctx, GLenum target)
     *     "if a particular type of <target> is not supported by the
     *     implementation the "unsupported" answer should be given.
     *     This is not an error."
+    *
+    * For OpenGL ES, queries can only be used with GL_RENDERBUFFER or MS.
     */
    switch(target){
+   case GL_TEXTURE_1D:
    case GL_TEXTURE_2D:
    case GL_TEXTURE_3D:
-      break;
-
-   case GL_TEXTURE_1D:
       if (!_mesa_is_desktop_gl(ctx))
          return false;
       break;
@@ -404,12 +404,12 @@ _is_target_supported(struct gl_context *ctx, GLenum target)
       break;
 
    case GL_TEXTURE_2D_ARRAY:
-      if (!(_mesa_has_EXT_texture_array(ctx) || _mesa_is_gles3(ctx)))
+      if (!_mesa_has_EXT_texture_array(ctx))
          return false;
       break;
 
    case GL_TEXTURE_CUBE_MAP:
-      if (!_mesa_has_ARB_texture_cube_map(ctx))
+      if (ctx->API != API_OPENGL_CORE && !_mesa_has_ARB_texture_cube_map(ctx))
          return false;
       break;
 
@@ -419,7 +419,7 @@ _is_target_supported(struct gl_context *ctx, GLenum target)
       break;
 
    case GL_TEXTURE_RECTANGLE:
-      if (!_mesa_has_NV_texture_rectangle(ctx))
+      if (!_mesa_has_ARB_texture_rectangle(ctx))
           return false;
       break;
 
@@ -718,8 +718,8 @@ _mesa_query_internal_format_default(struct gl_context *ctx, GLenum target,
  * arb_internalformat_query2 spec.
  */
 static GLenum
-equivalentSizePname(GLenum target,
-                    GLenum pname)
+_equivalent_size_pname(GLenum target,
+                       GLenum pname)
 {
    switch (target) {
    case GL_TEXTURE_1D:
@@ -763,7 +763,7 @@ equivalentSizePname(GLenum target,
  * per-se, so we can't just call _mesa_get_texture_dimension directly.
  */
 static GLint
-get_target_dimensions(GLenum target)
+_get_target_dimensions(GLenum target)
 {
    switch(target) {
    case GL_TEXTURE_BUFFER:
@@ -788,7 +788,7 @@ get_target_dimensions(GLenum target)
  *  <skip>."
  */
 static GLint
-get_min_dimensions(GLenum pname)
+_get_min_dimensions(GLenum pname)
 {
    switch(pname) {
    case GL_MAX_WIDTH:
@@ -807,7 +807,7 @@ get_min_dimensions(GLenum pname)
  * dimensions.
  */
 static bool
-is_multisample_target(GLenum target)
+_is_multisample_target(GLenum target)
 {
    switch(target) {
    case GL_TEXTURE_2D_MULTISAMPLE:
@@ -968,7 +968,8 @@ _mesa_GetInternalformativ(GLenum target, GLenum internalformat, GLenum pname,
 
       switch (pname) {
       case GL_INTERNALFORMAT_DEPTH_SIZE:
-         if (!_mesa_has_ARB_depth_texture(ctx) &&
+         if (ctx->API != API_OPENGL_CORE &&
+             !_mesa_has_ARB_depth_texture(ctx) &&
              target != GL_RENDERBUFFER &&
              target != GL_TEXTURE_BUFFER)
             goto end;
@@ -1015,12 +1016,12 @@ _mesa_GetInternalformativ(GLenum target, GLenum internalformat, GLenum pname,
        * "If the resource does not have at least two dimensions, or if the
        * resource is unsupported, zero is returned."
        */
-      dimensions = get_target_dimensions(target);
-      min_dimensions = get_min_dimensions(pname);
+      dimensions = _get_target_dimensions(target);
+      min_dimensions = _get_min_dimensions(pname);
       if (dimensions < min_dimensions)
          goto end;
 
-      get_pname = equivalentSizePname(target, pname);
+      get_pname = _equivalent_size_pname(target, pname);
       if (get_pname == 0)
          goto end;
 
@@ -1054,7 +1055,7 @@ _mesa_GetInternalformativ(GLenum target, GLenum internalformat, GLenum pname,
        * returned as MAX_HEIGHT or MAX_DEPTH */
       for (i = 0; i < 4; i++) {
          if (max_dimensions_pnames[i] == GL_SAMPLES &&
-             !is_multisample_target(target))
+             !_is_multisample_target(target))
             continue;
 
          _mesa_GetInternalformativ(target, internalformat,
@@ -1563,7 +1564,8 @@ _mesa_GetInternalformati64v(GLenum target, GLenum internalformat,
     * no pname can return a negative value, we fill params32 with negative
     * values as reference values, that can be used to know what copy-back to
     * params */
-   memset(params32, -1, 16);
+   for (i = 0; i < realSize; i++)
+      params32[i] = -1;
 
    /* For GL_MAX_COMBINED_DIMENSIONS we need to get back 2 32-bit integers,
     * and at the same time we only need 2. So for that pname, we call the

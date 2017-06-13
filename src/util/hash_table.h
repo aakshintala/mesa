@@ -105,7 +105,8 @@ static inline uint32_t _mesa_key_hash_string(const void *key)
 
 static inline uint32_t _mesa_hash_pointer(const void *pointer)
 {
-   return _mesa_hash_data(&pointer, sizeof(pointer));
+   uintptr_t num = (uintptr_t) pointer;
+   return (uint32_t) ((num >> 2) ^ (num >> 6) ^ (num >> 10) ^ (num >> 14));
 }
 
 enum {
@@ -138,6 +139,19 @@ _mesa_fnv32_1a_accumulate_block(uint32_t hash, const void *data, size_t size)
    for (entry = _mesa_hash_table_next_entry(ht, NULL);  \
         entry != NULL;                                  \
         entry = _mesa_hash_table_next_entry(ht, entry))
+
+static inline void
+hash_table_call_foreach(struct hash_table *ht,
+                        void (*callback)(const void *key,
+                                         void *data,
+                                         void *closure),
+                        void *closure)
+{
+   struct hash_entry *entry;
+
+   hash_table_foreach(ht, entry)
+      callback(entry->key, entry->data, closure);
+}
 
 #ifdef __cplusplus
 } /* extern C */

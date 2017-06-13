@@ -73,8 +73,8 @@
 #include "enums.h"
 #include "glformats.h"
 #include "pixeltransfer.h"
-#include "../../gallium/auxiliary/util/u_format_rgb9e5.h"
-#include "../../gallium/auxiliary/util/u_format_r11g11b10f.h"
+#include "util/format_rgb9e5.h"
+#include "util/format_r11g11b10f.h"
 
 
 enum {
@@ -1360,10 +1360,17 @@ _mesa_store_compressed_texsubimage(struct gl_context *ctx, GLuint dims,
       if (dstMap) {
 
          /* copy rows of blocks */
-         for (i = 0; i < store.CopyRowsPerSlice; i++) {
-            memcpy(dstMap, src, store.CopyBytesPerRow);
-            dstMap += dstRowStride;
-            src += store.TotalBytesPerRow;
+         if (dstRowStride == store.TotalBytesPerRow &&
+             dstRowStride == store.CopyBytesPerRow) {
+            memcpy(dstMap, src, store.CopyBytesPerRow * store.CopyRowsPerSlice);
+            src += store.CopyBytesPerRow * store.CopyRowsPerSlice;
+         }
+         else {
+            for (i = 0; i < store.CopyRowsPerSlice; i++) {
+               memcpy(dstMap, src, store.CopyBytesPerRow);
+               dstMap += dstRowStride;
+               src += store.TotalBytesPerRow;
+            }
          }
 
          ctx->Driver.UnmapTextureImage(ctx, texImage, slice + zoffset);

@@ -43,6 +43,11 @@ struct vgpu10_format_entry
    unsigned flags;
 };
 
+struct format_compat_entry
+{
+   enum pipe_format pformat;
+   const SVGA3dSurfaceFormat *compat_format;
+};
 
 static const struct vgpu10_format_entry format_conversion_table[] =
 {
@@ -354,6 +359,7 @@ static const struct vgpu10_format_entry format_conversion_table[] =
    { PIPE_FORMAT_ASTC_10x10_SRGB,       SVGA3D_FORMAT_INVALID,      SVGA3D_FORMAT_INVALID,       0 },
    { PIPE_FORMAT_ASTC_12x10_SRGB,       SVGA3D_FORMAT_INVALID,      SVGA3D_FORMAT_INVALID,       0 },
    { PIPE_FORMAT_ASTC_12x12_SRGB,       SVGA3D_FORMAT_INVALID,      SVGA3D_FORMAT_INVALID,       0 },
+   { PIPE_FORMAT_P016,                  SVGA3D_FORMAT_INVALID,      SVGA3D_FORMAT_INVALID,       0 },
 };
 
 
@@ -375,17 +381,43 @@ svga_translate_vertex_format_vgpu10(enum pipe_format format,
 }
 
 
+/**
+ * Translate a gallium scanout format to a svga format valid
+ * for screen target surface.
+ */
+static SVGA3dSurfaceFormat
+svga_translate_screen_target_format_vgpu10(enum pipe_format format)
+{
+   switch (format) {
+   case PIPE_FORMAT_B8G8R8A8_UNORM:
+      return SVGA3D_B8G8R8A8_UNORM;
+   case PIPE_FORMAT_B8G8R8X8_UNORM:
+      return SVGA3D_B8G8R8X8_UNORM;
+   case PIPE_FORMAT_B5G6R5_UNORM:
+      return SVGA3D_R5G6B5;
+   case PIPE_FORMAT_B5G5R5A1_UNORM:
+      return SVGA3D_A1R5G5B5;
+   default:
+      debug_printf("Invalid format %s specified for screen target\n",
+                   svga_format_name(format));
+      return SVGA3D_FORMAT_INVALID;
+   }
+}
+
 /*
  * Translate from gallium format to SVGA3D format.
  */
 SVGA3dSurfaceFormat
-svga_translate_format(struct svga_screen *ss,
+svga_translate_format(const struct svga_screen *ss,
                       enum pipe_format format,
                       unsigned bind)
 {
    if (ss->sws->have_vgpu10) {
       if (bind & (PIPE_BIND_VERTEX_BUFFER | PIPE_BIND_INDEX_BUFFER)) {
          return format_conversion_table[format].vertex_format;
+      }
+      else if (bind & PIPE_BIND_SCANOUT) {
+         return svga_translate_screen_target_format_vgpu10(format);
       }
       else {
          return format_conversion_table[format].pixel_format;
@@ -1686,18 +1718,14 @@ static const struct format_cap format_cap_table[] = {
       SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET
    },
    {
-      /* Special case: no devcap / report sampler, render target and
-       * depth/stencil ability
-       */
       "SVGA3D_R32_FLOAT",
       SVGA3D_R32_FLOAT,
-      0, /*SVGA3D_DEVCAP_DXFMT_R32_FLOAT*/
+      SVGA3D_DEVCAP_DXFMT_R32_FLOAT,
       1, 1, 4,
       SVGA3DFORMAT_OP_TEXTURE |
       SVGA3DFORMAT_OP_VOLUMETEXTURE |
       SVGA3DFORMAT_OP_CUBETEXTURE |
-      SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET |
-      SVGA3DFORMAT_OP_ZSTENCIL
+      SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET
    },
    {
       "SVGA3D_R8G8_SNORM",
@@ -1824,6 +1852,27 @@ static const struct format_cap format_cap_table[] = {
    }
 };
 
+static const SVGA3dSurfaceFormat compat_x8r8g8b8[] = {
+   SVGA3D_X8R8G8B8, SVGA3D_A8R8G8B8, SVGA3D_B8G8R8X8_UNORM,
+   SVGA3D_B8G8R8A8_UNORM, 0
+};
+static const SVGA3dSurfaceFormat compat_r8[] = {
+   SVGA3D_R8_UNORM, SVGA3D_NV12, SVGA3D_YV12, 0
+};
+static const SVGA3dSurfaceFormat compat_g8r8[] = {
+   SVGA3D_R8G8_UNORM, SVGA3D_NV12, 0
+};
+static const SVGA3dSurfaceFormat compat_r5g6b5[] = {
+   SVGA3D_R5G6B5, SVGA3D_B5G6R5_UNORM, 0
+};
+
+static const struct format_compat_entry format_compats[] = {
+   {PIPE_FORMAT_B8G8R8X8_UNORM, compat_x8r8g8b8},
+   {PIPE_FORMAT_B8G8R8A8_UNORM, compat_x8r8g8b8},
+   {PIPE_FORMAT_R8_UNORM, compat_r8},
+   {PIPE_FORMAT_R8G8_UNORM, compat_g8r8},
+   {PIPE_FORMAT_B5G6R5_UNORM, compat_r5g6b5}
+};
 
 /**
  * Debug only:
@@ -2211,5 +2260,110 @@ svga_format_is_uncompressed_snorm(SVGA3dSurfaceFormat format)
       return true;
    default:
       return false;
+   }
+}
+
+
+bool
+svga_format_is_typeless(SVGA3dSurfaceFormat format)
+{
+   switch (format) {
+   case SVGA3D_R32G32B32A32_TYPELESS:
+   case SVGA3D_R32G32B32_TYPELESS:
+   case SVGA3D_R16G16B16A16_TYPELESS:
+   case SVGA3D_R32G32_TYPELESS:
+   case SVGA3D_R32G8X24_TYPELESS:
+   case SVGA3D_R10G10B10A2_TYPELESS:
+   case SVGA3D_R8G8B8A8_TYPELESS:
+   case SVGA3D_R16G16_TYPELESS:
+   case SVGA3D_R32_TYPELESS:
+   case SVGA3D_R24G8_TYPELESS:
+   case SVGA3D_R8G8_TYPELESS:
+   case SVGA3D_R16_TYPELESS:
+   case SVGA3D_R8_TYPELESS:
+   case SVGA3D_BC1_TYPELESS:
+   case SVGA3D_BC2_TYPELESS:
+   case SVGA3D_BC3_TYPELESS:
+   case SVGA3D_BC4_TYPELESS:
+   case SVGA3D_BC5_TYPELESS:
+   case SVGA3D_B8G8R8A8_TYPELESS:
+   case SVGA3D_B8G8R8X8_TYPELESS:
+      return true;
+   default:
+      return false;
+   }
+}
+
+
+/**
+ * \brief Can we import a surface with a given SVGA3D format as a texture?
+ *
+ * \param ss[in]  pointer to the svga screen.
+ * \param pformat[in]  pipe format of the local texture.
+ * \param sformat[in]  svga3d format of the imported surface.
+ * \param bind[in]  bind flags of the imported texture.
+ * \param verbose[in]  Print out incompatibilities in debug mode.
+ */
+bool
+svga_format_is_shareable(const struct svga_screen *ss,
+                         enum pipe_format pformat,
+                         SVGA3dSurfaceFormat sformat,
+                         unsigned bind,
+                         bool verbose)
+{
+   SVGA3dSurfaceFormat default_format =
+      svga_translate_format(ss, pformat, bind);
+   int i;
+
+   if (default_format == SVGA3D_FORMAT_INVALID)
+      return false;
+   if (default_format == sformat)
+      return true;
+
+   for (i = 0; i < ARRAY_SIZE(format_compats); ++i) {
+      if (format_compats[i].pformat == pformat) {
+         const SVGA3dSurfaceFormat *compat_format =
+            format_compats[i].compat_format;
+         while (*compat_format != 0) {
+            if (*compat_format == sformat)
+               return true;
+            compat_format++;
+         }
+      }
+   }
+
+   if (verbose) {
+      debug_printf("Incompatible imported surface format.\n");
+      debug_printf("Texture format: \"%s\". Imported format: \"%s\".\n",
+                   svga_format_name(default_format),
+                   svga_format_name(sformat));
+   }
+
+   return false;
+}
+
+
+/**
+  * Return the sRGB format which corresponds to the given (linear) format.
+  * If there's no such sRGB format, return the format as-is.
+  */
+SVGA3dSurfaceFormat
+svga_linear_to_srgb(SVGA3dSurfaceFormat format)
+{
+   switch (format) {
+   case SVGA3D_R8G8B8A8_UNORM:
+      return SVGA3D_R8G8B8A8_UNORM_SRGB;
+   case SVGA3D_BC1_UNORM:
+      return SVGA3D_BC1_UNORM_SRGB;
+   case SVGA3D_BC2_UNORM:
+      return SVGA3D_BC2_UNORM_SRGB;
+   case SVGA3D_BC3_UNORM:
+      return SVGA3D_BC3_UNORM_SRGB;
+   case SVGA3D_B8G8R8A8_UNORM:
+      return SVGA3D_B8G8R8A8_UNORM_SRGB;
+   case SVGA3D_B8G8R8X8_UNORM:
+      return SVGA3D_B8G8R8X8_UNORM_SRGB;
+   default:
+      return format;
    }
 }

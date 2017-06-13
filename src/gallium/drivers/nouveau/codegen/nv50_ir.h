@@ -57,6 +57,7 @@ enum operation
    OP_MAD,
    OP_FMA,
    OP_SAD, // abs(src0 - src1) + src2
+   OP_SHLADD,
    OP_ABS,
    OP_NEG,
    OP_NOT,
@@ -174,6 +175,7 @@ enum operation
 #define NV50_IR_SUBOP_LDC_IS       2
 #define NV50_IR_SUBOP_LDC_ISL      3
 #define NV50_IR_SUBOP_SHIFT_WRAP   1
+#define NV50_IR_SUBOP_SHIFT_HIGH   2
 #define NV50_IR_SUBOP_EMU_PRERET   1
 #define NV50_IR_SUBOP_TEXBAR(n)    n
 #define NV50_IR_SUBOP_MOV_FINAL    1
@@ -249,6 +251,10 @@ enum operation
 #define NV50_IR_SUBOP_VOTE_ALL 0
 #define NV50_IR_SUBOP_VOTE_ANY 1
 #define NV50_IR_SUBOP_VOTE_UNI 2
+
+#define NV50_IR_SUBOP_MINMAX_LOW  1
+#define NV50_IR_SUBOP_MINMAX_MED  2
+#define NV50_IR_SUBOP_MINMAX_HIGH 3
 
 enum DataType
 {
@@ -412,6 +418,8 @@ enum ImgFormat
    FMT_R16_SNORM,
    FMT_R8_SNORM,
 
+   FMT_BGRA8,
+
    IMG_FORMAT_COUNT,
 };
 
@@ -462,6 +470,11 @@ enum SVSemantic
    SV_BASEINSTANCE,
    SV_DRAWID,
    SV_WORK_DIM,
+   SV_LANEMASK_EQ,
+   SV_LANEMASK_LT,
+   SV_LANEMASK_LE,
+   SV_LANEMASK_GT,
+   SV_LANEMASK_GE,
    SV_UNDEFINED,
    SV_LAST
 };
@@ -588,7 +601,6 @@ public:
 public:
    Modifier mod;
    int8_t indirect[2]; // >= 0 if relative to lvalue in insn->src(indirect[i])
-   uint8_t swizzle;
 
    bool usedAsPtr; // for printing
 
@@ -654,7 +666,7 @@ public:
    inline const Symbol *asSym() const;
    inline const ImmediateValue *asImm() const;
 
-   inline bool inFile(DataFile f) { return reg.file == f; }
+   inline bool inFile(DataFile f) const { return reg.file == f; }
 
    static inline Value *get(Iterator&);
 
@@ -832,6 +844,10 @@ public:
    bool isActionEqual(const Instruction *) const;
    bool isResultEqual(const Instruction *) const;
 
+   // check whether the defs interfere with srcs and defs of another instruction
+   bool canCommuteDefDef(const Instruction *) const;
+   bool canCommuteDefSrc(const Instruction *) const;
+
    void print() const;
 
    inline CmpInstruction *asCmp();
@@ -967,6 +983,7 @@ public:
       uint8_t components;
       uint8_t bits[4];
       ImgType type;
+      bool bgra;
    };
 
    static const struct ImgFormatDesc formatTable[IMG_FORMAT_COUNT];
@@ -1236,7 +1253,6 @@ public:
    inline void add(Value *rval, int& id) { allRValues.insert(rval, id); }
 
    bool makeFromTGSI(struct nv50_ir_prog_info *);
-   bool makeFromSM4(struct nv50_ir_prog_info *);
    bool convertToSSA();
    bool optimizeSSA(int level);
    bool optimizePostRA(int level);

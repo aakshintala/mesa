@@ -31,8 +31,7 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/src \
 	$(VISIBILITY_CFLAGS) \
 	$(XCB_DRI3_CFLAGS) \
-	$(LIBDRM_CFLAGS) \
-	$(LIBUDEV_CFLAGS)
+	$(LIBDRM_CFLAGS)
 
 libloader_la_CPPFLAGS = $(AM_CPPFLAGS)
 libloader_la_SOURCES = $(LOADER_C_FILES)
@@ -40,13 +39,13 @@ libloader_la_LIBADD =
 
 if HAVE_DRICOMMON
 libloader_la_CPPFLAGS += \
-	-I$(top_srcdir)/src/mesa/drivers/dri/common/ \
 	-I$(top_builddir)/src/mesa/drivers/dri/common/ \
+	-I$(top_srcdir)/src/mesa/drivers/dri/common/ \
 	-I$(top_srcdir)/src/mesa/ \
 	-I$(top_srcdir)/src/mapi/ \
 	-DUSE_DRICONF
 
- libloader_la_LIBADD += \
+libloader_la_LIBADD += \
 	$(top_builddir)/src/mesa/drivers/dri/common/libxmlconfig.la
 
 endif
@@ -56,6 +55,7 @@ libloader_la_LIBADD += \
 	$(LIBDRM_LIBS)
 endif
 
+if HAVE_PLATFORM_X11
 if HAVE_DRI3
 noinst_LTLIBRARIES += libloader_dri3_helper.la
 
@@ -63,4 +63,5 @@ libloader_dri3_helper_la_SOURCES = \
 	loader_dri3_helper.c \
 	loader_dri3_helper.h
 libloader_dri3_helper_la_LIBADD = $(XCB_DRI3_LIBS)
+endif
 endif

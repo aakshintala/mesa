@@ -26,11 +26,8 @@ struct nvc0_program {
    uint8_t num_gprs;
 
    uint32_t *code;
-   uint32_t *immd_data;
    unsigned code_base;
    unsigned code_size;
-   unsigned immd_base;
-   unsigned immd_size; /* size of immediate array data */
    unsigned parm_size; /* size of non-bindable uniforms (c0[]) */
 
    uint32_t hdr[20];
@@ -52,6 +49,8 @@ struct nvc0_program {
       bool sample_mask_in;
       bool force_persample_interp;
       bool flatshade;
+      bool reads_framebuffer;
+      bool post_depth_coverage;
    } fp;
    struct {
       uint32_t tess_mode; /* ~0 if defined by the other stage */

@@ -546,6 +546,7 @@ _mesa_bytes_per_vertex_attrib(GLint comps, GLenum type)
    case GL_FLOAT:
       return comps * sizeof(GLfloat);
    case GL_HALF_FLOAT_ARB:
+   case GL_HALF_FLOAT_OES:
       return comps * sizeof(GLhalfARB);
    case GL_DOUBLE:
       return comps * sizeof(GLdouble);
@@ -904,6 +905,29 @@ _mesa_is_astc_format(GLenum internalFormat)
 {
    return is_astc_2d_format(internalFormat) ||
           is_astc_3d_format(internalFormat);
+}
+
+/**
+ * Test if the given format is an ETC2 format.
+ */
+GLboolean
+_mesa_is_etc2_format(GLenum internalFormat)
+{
+   switch (internalFormat) {
+   case GL_COMPRESSED_RGB8_ETC2:
+   case GL_COMPRESSED_SRGB8_ETC2:
+   case GL_COMPRESSED_RGBA8_ETC2_EAC:
+   case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+   case GL_COMPRESSED_R11_EAC:
+   case GL_COMPRESSED_RG11_EAC:
+   case GL_COMPRESSED_SIGNED_R11_EAC:
+   case GL_COMPRESSED_SIGNED_RG11_EAC:
+   case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+   case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+      return true;
+   default:
+      return false;
+   }
 }
 
 /**
@@ -2495,7 +2519,6 @@ _mesa_base_tex_format(const struct gl_context *ctx, GLint internalFormat)
       case GL_RGBA8I_EXT:
       case GL_RGBA16I_EXT:
       case GL_RGBA32I_EXT:
-      case GL_RGB10_A2UI:
          return GL_RGBA;
       case GL_RGB8UI_EXT:
       case GL_RGB16UI_EXT:
@@ -2504,6 +2527,13 @@ _mesa_base_tex_format(const struct gl_context *ctx, GLint internalFormat)
       case GL_RGB16I_EXT:
       case GL_RGB32I_EXT:
          return GL_RGB;
+      }
+   }
+
+   if (ctx->Extensions.ARB_texture_rgb10_a2ui) {
+      switch (internalFormat) {
+      case GL_RGB10_A2UI:
+         return GL_RGBA;
       }
    }
 
@@ -3602,6 +3632,21 @@ _mesa_format_from_format_and_type(GLenum format, GLenum type)
    unreachable("Unsupported format");
 }
 
+uint32_t
+_mesa_tex_format_from_format_and_type(const struct gl_context *ctx,
+                                      GLenum gl_format, GLenum type)
+{
+   mesa_format format = _mesa_format_from_format_and_type(gl_format, type);
+
+   if (_mesa_format_is_mesa_array_format(format))
+      format = _mesa_format_from_array_format(format);
+      
+   if (format == MESA_FORMAT_NONE || !ctx->TextureFormatSupported[format])
+      return MESA_FORMAT_NONE;
+
+   return format;
+}
+
 /**
  * Returns true if \p internal_format is a sized internal format that
  * is marked "Color Renderable" in Table 8.10 of the ES 3.2 specification.
@@ -3656,7 +3701,8 @@ _mesa_is_es3_color_renderable(GLenum internal_format)
  * is marked "Texture Filterable" in Table 8.10 of the ES 3.2 specification.
  */
 bool
-_mesa_is_es3_texture_filterable(GLenum internal_format)
+_mesa_is_es3_texture_filterable(const struct gl_context *ctx,
+                                GLenum internal_format)
 {
    switch (internal_format) {
    case GL_R8:
@@ -3680,6 +3726,20 @@ _mesa_is_es3_texture_filterable(GLenum internal_format)
    case GL_R11F_G11F_B10F:
    case GL_RGB9_E5:
       return true;
+   case GL_R32F:
+   case GL_RG32F:
+   case GL_RGB32F:
+   case GL_RGBA32F:
+      /* The OES_texture_float_linear spec says:
+       *
+       *    "When implemented against OpenGL ES 3.0 or later versions, sized
+       *     32-bit floating-point formats become texture-filterable. This
+       *     should be noted by, for example, checking the ``TF'' column of
+       *     table 8.13 in the ES 3.1 Specification (``Correspondence of sized
+       *     internal formats to base internal formats ... and use cases ...'')
+       *     for the R32F, RG32F, RGB32F, and RGBA32F formats."
+       */
+      return ctx->Extensions.OES_texture_float_linear;
    default:
       return false;
    }

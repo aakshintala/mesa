@@ -30,7 +30,7 @@ const uint8_t Target::operationSrcNr[] =
    0, 0,                   // NOP, PHI
    0, 0, 0, 0,             // UNION, SPLIT, MERGE, CONSTRAINT
    1, 1, 2,                // MOV, LOAD, STORE
-   2, 2, 2, 2, 2, 3, 3, 3, // ADD, SUB, MUL, DIV, MOD, MAD, FMA, SAD
+   2, 2, 2, 2, 2, 3, 3, 3, 3, // ADD, SUB, MUL, DIV, MOD, MAD, FMA, SAD, SHLADD
    1, 1, 1,                // ABS, NEG, NOT
    2, 2, 2, 2, 2,          // AND, OR, XOR, SHL, SHR
    2, 2, 1,                // MAX, MIN, SAT
@@ -70,10 +70,10 @@ const OpClass Target::operationClass[] =
    OPCLASS_MOVE,
    OPCLASS_LOAD,
    OPCLASS_STORE,
-   // ADD, SUB, MUL; DIV, MOD; MAD, FMA, SAD
+   // ADD, SUB, MUL; DIV, MOD; MAD, FMA, SAD, SHLADD
    OPCLASS_ARITH, OPCLASS_ARITH, OPCLASS_ARITH,
    OPCLASS_ARITH, OPCLASS_ARITH,
-   OPCLASS_ARITH, OPCLASS_ARITH, OPCLASS_ARITH,
+   OPCLASS_ARITH, OPCLASS_ARITH, OPCLASS_ARITH, OPCLASS_ARITH,
    // ABS, NEG; NOT, AND, OR, XOR; SHL, SHR
    OPCLASS_CONVERT, OPCLASS_CONVERT,
    OPCLASS_LOGIC, OPCLASS_LOGIC, OPCLASS_LOGIC, OPCLASS_LOGIC,
@@ -150,6 +150,7 @@ Target *Target::create(unsigned int chipset)
    switch (chipset & ~0xf) {
    case 0x110:
    case 0x120:
+   case 0x130:
       return getTargetGM107(chipset);
    case 0xc0:
    case 0xd0:
@@ -391,7 +392,8 @@ Program::emitBinary(struct nv50_ir_prog_info *info)
          for (Instruction *i = fn->bbArray[b]->getEntry(); i; i = i->next) {
             emit->emitInstruction(i);
             info->bin.instructions++;
-            if (i->sType == TYPE_F64 || i->dType == TYPE_F64)
+            if ((typeSizeof(i->sType) == 8 || typeSizeof(i->dType) == 8) &&
+                (isFloatType(i->sType) || isFloatType(i->dType)))
                info->io.fp64 = true;
          }
       }
@@ -505,14 +507,16 @@ nv50_ir_relocate_code(void *relocData, uint32_t *code,
 
 void
 nv50_ir_apply_fixups(void *fixupData, uint32_t *code,
-                     bool force_persample_interp, bool flatshade)
+                     bool force_persample_interp, bool flatshade,
+                     uint8_t alphatest)
 {
    nv50_ir::FixupInfo *info = reinterpret_cast<nv50_ir::FixupInfo *>(
       fixupData);
 
    // force_persample_interp: all non-flat -> per-sample
    // flatshade: all color -> flat
-   nv50_ir::FixupData data(force_persample_interp, flatshade);
+   // alphatest: PIPE_FUNC_* to use with alphatest
+   nv50_ir::FixupData data(force_persample_interp, flatshade, alphatest);
    for (unsigned i = 0; i < info->count; ++i)
       info->entry[i].apply(&info->entry[i], code, data);
 }

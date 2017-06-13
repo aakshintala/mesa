@@ -80,8 +80,8 @@ static int classify_identifier(struct _mesa_glsl_parse_state *, const char *);
 			  "illegal use of reserved word `%s'", yytext);	\
 	 return ERROR_TOK;						\
       } else {								\
-	 void *mem_ctx = yyextra;					\
-	 yylval->identifier = ralloc_strdup(mem_ctx, yytext);		\
+	 void *mem_ctx = yyextra->linalloc;					\
+	 yylval->identifier = linear_strdup(mem_ctx, yytext);		\
 	 return classify_identifier(yyextra, yytext);			\
       }									\
    } while (0)
@@ -107,17 +107,29 @@ literal_integer(char *text, int len, struct _mesa_glsl_parse_state *state,
 {
    bool is_uint = (text[len - 1] == 'u' ||
 		   text[len - 1] == 'U');
+   bool is_long = (text[len - 1] == 'l' || text[len - 1] == 'L');
    const char *digits = text;
 
+   if (is_long)
+      is_uint = (text[len - 2] == 'u' && text[len - 1] == 'l') ||
+                (text[len - 2] == 'U' && text[len - 1] == 'L');
    /* Skip "0x" */
    if (base == 16)
       digits += 2;
 
    unsigned long long value = strtoull(digits, NULL, base);
 
-   lval->n = (int)value;
+   if (is_long)
+      lval->n64 = (int64_t)value;
+   else
+      lval->n = (int)value;
 
-   if (value > UINT_MAX) {
+   if (is_long && !is_uint && base == 10 && value > (uint64_t)LLONG_MAX + 1) {
+      /* Tries to catch unintentionally providing a negative value. */
+      _mesa_glsl_warning(lloc, state,
+                         "signed literal value `%s' is interpreted as %lld",
+                         text, lval->n64);
+   } else if (!is_long && value > UINT_MAX) {
       /* Note that signed 0xffffffff is valid, not out of range! */
       if (state->is_version(130, 300)) {
 	 _mesa_glsl_error(lloc, state,
@@ -135,7 +147,10 @@ literal_integer(char *text, int len, struct _mesa_glsl_parse_state *state,
 			 "signed literal value `%s' is interpreted as %d",
 			 text, lval->n);
    }
-   return is_uint ? UINTCONSTANT : INTCONSTANT;
+   if (is_long)
+      return is_uint ? UINT64CONSTANT : INT64CONSTANT;
+   else
+      return is_uint ? UINTCONSTANT : INTCONSTANT;
 }
 
 #define LITERAL_INTEGER(base) \
@@ -245,12 +260,16 @@ HASH		^{SPC}#{SPC}
 <PP>[ \t\r]*			{ }
 <PP>:				return COLON;
 <PP>[_a-zA-Z][_a-zA-Z0-9]*	{
-				   void *mem_ctx = yyextra;
-				   yylval->identifier = ralloc_strdup(mem_ctx, yytext);
+				   void *mem_ctx = yyextra->linalloc;
+				   yylval->identifier = linear_strdup(mem_ctx, yytext);
 				   return IDENTIFIER;
 				}
 <PP>[1-9][0-9]*			{
 				    yylval->n = strtol(yytext, NULL, 10);
+				    return INTCONSTANT;
+				}
+<PP>0				{
+				    yylval->n = 0;
 				    return INTCONSTANT;
 				}
 <PP>\n				{ BEGIN 0; yylineno++; yycolumn = 0; return EOL; }
@@ -311,7 +330,7 @@ invariant	KEYWORD(120, 100, 120, 100, INVARIANT);
 flat		KEYWORD(130, 100, 130, 300, FLAT);
 smooth		KEYWORD(130, 300, 130, 300, SMOOTH);
 noperspective	KEYWORD(130, 300, 130, 0, NOPERSPECTIVE);
-patch		KEYWORD_WITH_ALT(0, 300, 400, 0, yyextra->ARB_tessellation_shader_enable, PATCH);
+patch		KEYWORD_WITH_ALT(0, 300, 400, 320, yyextra->has_tessellation_shader(), PATCH);
 
 sampler1D	DEPRECATED_ES_KEYWORD(SAMPLER1D);
 sampler2D	return SAMPLER2D;
@@ -348,10 +367,10 @@ isampler2DMSArray  KEYWORD_WITH_ALT(150, 300, 150, 320, yyextra->ARB_texture_mul
 usampler2DMSArray  KEYWORD_WITH_ALT(150, 300, 150, 320, yyextra->ARB_texture_multisample_enable || yyextra->OES_texture_storage_multisample_2d_array_enable, USAMPLER2DMSARRAY);
 
    /* keywords available with ARB_texture_cube_map_array_enable extension on desktop GLSL */
-samplerCubeArray   KEYWORD_WITH_ALT(400, 0, 400, 0, yyextra->ARB_texture_cube_map_array_enable, SAMPLERCUBEARRAY);
-isamplerCubeArray KEYWORD_WITH_ALT(400, 0, 400, 0, yyextra->ARB_texture_cube_map_array_enable, ISAMPLERCUBEARRAY);
-usamplerCubeArray KEYWORD_WITH_ALT(400, 0, 400, 0, yyextra->ARB_texture_cube_map_array_enable, USAMPLERCUBEARRAY);
-samplerCubeArrayShadow   KEYWORD_WITH_ALT(400, 0, 400, 0, yyextra->ARB_texture_cube_map_array_enable, SAMPLERCUBEARRAYSHADOW);
+samplerCubeArray   KEYWORD_WITH_ALT(400, 310, 400, 320, yyextra->ARB_texture_cube_map_array_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, SAMPLERCUBEARRAY);
+isamplerCubeArray KEYWORD_WITH_ALT(400, 310, 400, 320, yyextra->ARB_texture_cube_map_array_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, ISAMPLERCUBEARRAY);
+usamplerCubeArray KEYWORD_WITH_ALT(400, 310, 400, 320, yyextra->ARB_texture_cube_map_array_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, USAMPLERCUBEARRAY);
+samplerCubeArrayShadow   KEYWORD_WITH_ALT(400, 310, 400, 320, yyextra->ARB_texture_cube_map_array_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, SAMPLERCUBEARRAYSHADOW);
 
 samplerExternalOES		{
 			  if (yyextra->OES_EGL_image_external_enable)
@@ -372,7 +391,7 @@ imageCube       KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_l
 imageBuffer     KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->EXT_texture_buffer_enable || yyextra->OES_texture_buffer_enable, IMAGEBUFFER);
 image1DArray    KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IMAGE1DARRAY);
 image2DArray    KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_load_store_enable, IMAGE2DARRAY);
-imageCubeArray  KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IMAGECUBEARRAY);
+imageCubeArray  KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, IMAGECUBEARRAY);
 image2DMS       KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IMAGE2DMS);
 image2DMSArray  KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IMAGE2DMSARRAY);
 iimage1D        KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IIMAGE1D);
@@ -383,7 +402,7 @@ iimageCube      KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_l
 iimageBuffer    KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->EXT_texture_buffer_enable || yyextra->OES_texture_buffer_enable, IIMAGEBUFFER);
 iimage1DArray   KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IIMAGE1DARRAY);
 iimage2DArray   KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_load_store_enable, IIMAGE2DARRAY);
-iimageCubeArray KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IIMAGECUBEARRAY);
+iimageCubeArray KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, IIMAGECUBEARRAY);
 iimage2DMS      KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IIMAGE2DMS);
 iimage2DMSArray KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, IIMAGE2DMSARRAY);
 uimage1D        KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, UIMAGE1D);
@@ -394,7 +413,7 @@ uimageCube      KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_l
 uimageBuffer    KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->EXT_texture_buffer_enable || yyextra->OES_texture_buffer_enable, UIMAGEBUFFER);
 uimage1DArray   KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, UIMAGE1DARRAY);
 uimage2DArray   KEYWORD_WITH_ALT(130, 300, 420, 310, yyextra->ARB_shader_image_load_store_enable, UIMAGE2DARRAY);
-uimageCubeArray KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, UIMAGECUBEARRAY);
+uimageCubeArray KEYWORD_WITH_ALT(130, 300, 420, 320, yyextra->ARB_shader_image_load_store_enable || yyextra->OES_texture_cube_map_array_enable || yyextra->EXT_texture_cube_map_array_enable, UIMAGECUBEARRAY);
 uimage2DMS      KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, UIMAGE2DMS);
 uimage2DMSArray KEYWORD_WITH_ALT(130, 300, 420, 0, yyextra->ARB_shader_image_load_store_enable, UIMAGE2DMSARRAY);
 image1DShadow           KEYWORD(130, 300, 0, 0, IMAGE1DSHADOW);
@@ -429,8 +448,8 @@ layout		{
                       || yyextra->ARB_tessellation_shader_enable) {
 		      return LAYOUT_TOK;
 		   } else {
-		      void *mem_ctx = yyextra;
-		      yylval->identifier = ralloc_strdup(mem_ctx, yytext);
+		      void *mem_ctx = yyextra->linalloc;
+		      yylval->identifier = linear_strdup(mem_ctx, yytext);
 		      return classify_identifier(yyextra, yytext);
 		   }
 		}
@@ -458,13 +477,13 @@ layout		{
 \|=		return OR_ASSIGN;
 -=		return SUB_ASSIGN;
 
-[1-9][0-9]*[uU]?	{
+[1-9][0-9]*([uU]|[lL]|ul|UL)?	{
 			    return LITERAL_INTEGER(10);
 			}
-0[xX][0-9a-fA-F]+[uU]?	{
+0[xX][0-9a-fA-F]+([uU]|[lL]|ul|UL)?	{
 			    return LITERAL_INTEGER(16);
 			}
-0[0-7]*[uU]?		{
+0[0-7]*([uU]|[lL]|ul|UL)?		{
 			    return LITERAL_INTEGER(8);
 			}
 
@@ -587,16 +606,26 @@ resource	KEYWORD(420, 300, 0, 0, RESOURCE);
 sample		KEYWORD_WITH_ALT(400, 300, 400, 320, yyextra->ARB_gpu_shader5_enable || yyextra->OES_shader_multisample_interpolation_enable, SAMPLE);
 subroutine	KEYWORD_WITH_ALT(400, 300, 400, 0, yyextra->ARB_shader_subroutine_enable, SUBROUTINE);
 
+    /* Additional words for ARB_gpu_shader_int64 */
+int64_t		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, INT64_TOK);
+i64vec2		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, I64VEC2);
+i64vec3		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, I64VEC3);
+i64vec4		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, I64VEC4);
+
+uint64_t	KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, UINT64_TOK);
+u64vec2		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, U64VEC2);
+u64vec3		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, U64VEC3);
+u64vec4		KEYWORD_WITH_ALT(0, 0, 0, 0, yyextra->ARB_gpu_shader_int64_enable, U64VEC4);
 
 [_a-zA-Z][_a-zA-Z0-9]*	{
 			    struct _mesa_glsl_parse_state *state = yyextra;
-			    void *ctx = state;	
+			    void *ctx = state->linalloc;
 			    if (state->es_shader && strlen(yytext) > 1024) {
 			       _mesa_glsl_error(yylloc, state,
 			                        "Identifier `%s' exceeds 1024 characters",
 			                        yytext);
 			    } else {
-			      yylval->identifier = ralloc_strdup(ctx, yytext);
+			      yylval->identifier = linear_strdup(ctx, yytext);
 			    }
 			    return classify_identifier(state, yytext);
 			}

@@ -35,7 +35,8 @@ vtn_access_chain_extend(struct vtn_builder *b, struct vtn_access_chain *old,
    struct vtn_access_chain *chain;
 
    unsigned new_len = old->length + new_ids;
-   chain = ralloc_size(b, sizeof(*chain) + new_len * sizeof(chain->link[0]));
+   /* TODO: don't use rzalloc */
+   chain = rzalloc_size(b, sizeof(*chain) + new_len * sizeof(chain->link[0]));
 
    chain->var = old->var;
    chain->length = new_len;
@@ -114,6 +115,8 @@ vtn_access_chain_to_deref(struct vtn_builder *b, struct vtn_access_chain *chain)
       switch (base_type) {
       case GLSL_TYPE_UINT:
       case GLSL_TYPE_INT:
+      case GLSL_TYPE_UINT64:
+      case GLSL_TYPE_INT64:
       case GLSL_TYPE_FLOAT:
       case GLSL_TYPE_DOUBLE:
       case GLSL_TYPE_BOOL:
@@ -185,8 +188,7 @@ _vtn_local_load_store(struct vtn_builder *b, bool load, nir_deref_var *deref,
                                    nir_intrinsic_store_var;
 
       nir_intrinsic_instr *intrin = nir_intrinsic_instr_create(b->shader, op);
-      intrin->variables[0] =
-         nir_deref_as_var(nir_copy_deref(intrin, &deref->deref));
+      intrin->variables[0] = nir_deref_var_clone(deref, intrin);
       intrin->num_components = glsl_get_vector_elements(tail->type);
 
       if (load) {
@@ -347,6 +349,8 @@ vtn_access_chain_to_offset(struct vtn_builder *b,
       switch (base_type) {
       case GLSL_TYPE_UINT:
       case GLSL_TYPE_INT:
+      case GLSL_TYPE_UINT64:
+      case GLSL_TYPE_INT64:
       case GLSL_TYPE_FLOAT:
       case GLSL_TYPE_DOUBLE:
       case GLSL_TYPE_BOOL:
@@ -385,9 +389,90 @@ end:
    return offset;
 }
 
+/* Tries to compute the size of an interface block based on the strides and
+ * offsets that are provided to us in the SPIR-V source.
+ */
+static unsigned
+vtn_type_block_size(struct vtn_type *type)
+{
+   enum glsl_base_type base_type = glsl_get_base_type(type->type);
+   switch (base_type) {
+   case GLSL_TYPE_UINT:
+   case GLSL_TYPE_INT:
+   case GLSL_TYPE_UINT64:
+   case GLSL_TYPE_INT64:
+   case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_BOOL:
+   case GLSL_TYPE_DOUBLE: {
+      unsigned cols = type->row_major ? glsl_get_vector_elements(type->type) :
+                                        glsl_get_matrix_columns(type->type);
+      if (cols > 1) {
+         assert(type->stride > 0);
+         return type->stride * cols;
+      } else if (base_type == GLSL_TYPE_DOUBLE ||
+		 base_type == GLSL_TYPE_UINT64 ||
+		 base_type == GLSL_TYPE_INT64) {
+         return glsl_get_vector_elements(type->type) * 8;
+      } else {
+         return glsl_get_vector_elements(type->type) * 4;
+      }
+   }
+
+   case GLSL_TYPE_STRUCT:
+   case GLSL_TYPE_INTERFACE: {
+      unsigned size = 0;
+      unsigned num_fields = glsl_get_length(type->type);
+      for (unsigned f = 0; f < num_fields; f++) {
+         unsigned field_end = type->offsets[f] +
+                              vtn_type_block_size(type->members[f]);
+         size = MAX2(size, field_end);
+      }
+      return size;
+   }
+
+   case GLSL_TYPE_ARRAY:
+      assert(type->stride > 0);
+      assert(glsl_get_length(type->type) > 0);
+      return type->stride * glsl_get_length(type->type);
+
+   default:
+      assert(!"Invalid block type");
+      return 0;
+   }
+}
+
+static void
+vtn_access_chain_get_offset_size(struct vtn_access_chain *chain,
+                                 unsigned *access_offset,
+                                 unsigned *access_size)
+{
+   /* Only valid for push constants accesses now. */
+   assert(chain->var->mode == vtn_variable_mode_push_constant);
+
+   struct vtn_type *type = chain->var->type;
+
+   *access_offset = 0;
+
+   for (unsigned i = 0; i < chain->length; i++) {
+      if (chain->link[i].mode != vtn_access_mode_literal)
+         break;
+
+      if (glsl_type_is_struct(type->type)) {
+         *access_offset += type->offsets[chain->link[i].id];
+         type = type->members[chain->link[i].id];
+      } else {
+         *access_offset += type->stride * chain->link[i].id;
+         type = type->array_element;
+      }
+   }
+
+   *access_size = vtn_type_block_size(type);
+}
+
 static void
 _vtn_load_store_tail(struct vtn_builder *b, nir_intrinsic_op op, bool load,
                      nir_ssa_def *index, nir_ssa_def *offset,
+                     unsigned access_offset, unsigned access_size,
                      struct vtn_ssa_value **inout, const struct glsl_type *type)
 {
    nir_intrinsic_instr *instr = nir_intrinsic_instr_create(b->nb.shader, op);
@@ -399,18 +484,25 @@ _vtn_load_store_tail(struct vtn_builder *b, nir_intrinsic_op op, bool load,
       instr->src[src++] = nir_src_for_ssa((*inout)->def);
    }
 
-   /* We set the base and size for push constant load to the entire push
-    * constant block for now.
-    */
    if (op == nir_intrinsic_load_push_constant) {
-      nir_intrinsic_set_base(instr, 0);
-      nir_intrinsic_set_range(instr, 128);
+      assert(access_offset % 4 == 0);
+
+      nir_intrinsic_set_base(instr, access_offset);
+      nir_intrinsic_set_range(instr, access_size);
    }
 
    if (index)
       instr->src[src++] = nir_src_for_ssa(index);
 
-   instr->src[src++] = nir_src_for_ssa(offset);
+   if (op == nir_intrinsic_load_push_constant) {
+      /* We need to subtract the offset from where the intrinsic will load the
+       * data. */
+      instr->src[src++] =
+         nir_src_for_ssa(nir_isub(&b->nb, offset,
+                                  nir_imm_int(&b->nb, access_offset)));
+   } else {
+      instr->src[src++] = nir_src_for_ssa(offset);
+   }
 
    if (load) {
       nir_ssa_dest_init(&instr->instr, &instr->dest,
@@ -428,6 +520,7 @@ _vtn_load_store_tail(struct vtn_builder *b, nir_intrinsic_op op, bool load,
 static void
 _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
                       nir_ssa_def *index, nir_ssa_def *offset,
+                      unsigned access_offset, unsigned access_size,
                       struct vtn_access_chain *chain, unsigned chain_idx,
                       struct vtn_type *type, struct vtn_ssa_value **inout)
 {
@@ -441,7 +534,10 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
    switch (base_type) {
    case GLSL_TYPE_UINT:
    case GLSL_TYPE_INT:
+   case GLSL_TYPE_UINT64:
+   case GLSL_TYPE_INT64:
    case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_DOUBLE:
    case GLSL_TYPE_BOOL:
       /* This is where things get interesting.  At this point, we've hit
        * a vector, a scalar, or a matrix.
@@ -472,6 +568,7 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
                   nir_iadd(&b->nb, offset,
                            nir_imm_int(&b->nb, i * type->stride));
                _vtn_load_store_tail(b, op, load, index, elem_offset,
+                                    access_offset, access_size,
                                     &(*inout)->elems[i],
                                     glsl_vector_type(base_type, vec_width));
             }
@@ -493,8 +590,9 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
                offset = nir_iadd(&b->nb, offset, row_offset);
                if (load)
                   *inout = vtn_create_ssa_value(b, glsl_scalar_type(base_type));
-               _vtn_load_store_tail(b, op, load, index, offset, inout,
-                                    glsl_scalar_type(base_type));
+               _vtn_load_store_tail(b, op, load, index, offset,
+                                    access_offset, access_size,
+                                    inout, glsl_scalar_type(base_type));
             } else {
                /* Grabbing a column; picking one element off each row */
                unsigned num_comps = glsl_get_vector_elements(type->type);
@@ -514,6 +612,7 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
                   }
                   comp = &temp_val;
                   _vtn_load_store_tail(b, op, load, index, elem_offset,
+                                       access_offset, access_size,
                                        &comp, glsl_scalar_type(base_type));
                   comps[i] = comp->def;
                }
@@ -532,20 +631,25 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
             offset = nir_iadd(&b->nb, offset, col_offset);
 
             _vtn_block_load_store(b, op, load, index, offset,
+                                  access_offset, access_size,
                                   chain, chain_idx + 1,
                                   type->array_element, inout);
          }
       } else if (chain == NULL) {
          /* Single whole vector */
          assert(glsl_type_is_vector_or_scalar(type->type));
-         _vtn_load_store_tail(b, op, load, index, offset, inout, type->type);
+         _vtn_load_store_tail(b, op, load, index, offset,
+                              access_offset, access_size,
+                              inout, type->type);
       } else {
          /* Single component of a vector. Fall through to array case. */
          nir_ssa_def *elem_offset =
             vtn_access_link_as_ssa(b, chain->link[chain_idx], type->stride);
          offset = nir_iadd(&b->nb, offset, elem_offset);
 
-         _vtn_block_load_store(b, op, load, index, offset, NULL, 0,
+         _vtn_block_load_store(b, op, load, index, offset,
+                               access_offset, access_size,
+                               NULL, 0,
                                type->array_element, inout);
       }
       return;
@@ -555,7 +659,9 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
       for (unsigned i = 0; i < elems; i++) {
          nir_ssa_def *elem_off =
             nir_iadd(&b->nb, offset, nir_imm_int(&b->nb, i * type->stride));
-         _vtn_block_load_store(b, op, load, index, elem_off, NULL, 0,
+         _vtn_block_load_store(b, op, load, index, elem_off,
+                               access_offset, access_size,
+                               NULL, 0,
                                type->array_element, &(*inout)->elems[i]);
       }
       return;
@@ -566,7 +672,9 @@ _vtn_block_load_store(struct vtn_builder *b, nir_intrinsic_op op, bool load,
       for (unsigned i = 0; i < elems; i++) {
          nir_ssa_def *elem_off =
             nir_iadd(&b->nb, offset, nir_imm_int(&b->nb, type->offsets[i]));
-         _vtn_block_load_store(b, op, load, index, elem_off, NULL, 0,
+         _vtn_block_load_store(b, op, load, index, elem_off,
+                               access_offset, access_size,
+                               NULL, 0,
                                type->members[i], &(*inout)->elems[i]);
       }
       return;
@@ -581,6 +689,7 @@ static struct vtn_ssa_value *
 vtn_block_load(struct vtn_builder *b, struct vtn_access_chain *src)
 {
    nir_intrinsic_op op;
+   unsigned access_offset = 0, access_size = 0;
    switch (src->var->mode) {
    case vtn_variable_mode_ubo:
       op = nir_intrinsic_load_ubo;
@@ -590,6 +699,7 @@ vtn_block_load(struct vtn_builder *b, struct vtn_access_chain *src)
       break;
    case vtn_variable_mode_push_constant:
       op = nir_intrinsic_load_push_constant;
+      vtn_access_chain_get_offset_size(src, &access_offset, &access_size);
       break;
    default:
       assert(!"Invalid block variable mode");
@@ -602,6 +712,7 @@ vtn_block_load(struct vtn_builder *b, struct vtn_access_chain *src)
 
    struct vtn_ssa_value *value = NULL;
    _vtn_block_load_store(b, op, true, index, offset,
+                         access_offset, access_size,
                          src, chain_idx, type, &value);
    return value;
 }
@@ -616,7 +727,7 @@ vtn_block_store(struct vtn_builder *b, struct vtn_ssa_value *src,
    offset = vtn_access_chain_to_offset(b, dst, &index, &type, &chain_idx, true);
 
    _vtn_block_load_store(b, nir_intrinsic_store_ssbo, false, index, offset,
-                         dst, chain_idx, type, &src);
+                         0, 0, dst, chain_idx, type, &src);
 }
 
 static bool
@@ -637,8 +748,11 @@ _vtn_variable_load_store(struct vtn_builder *b, bool load,
    switch (base_type) {
    case GLSL_TYPE_UINT:
    case GLSL_TYPE_INT:
+   case GLSL_TYPE_UINT64:
+   case GLSL_TYPE_INT64:
    case GLSL_TYPE_FLOAT:
    case GLSL_TYPE_BOOL:
+   case GLSL_TYPE_DOUBLE:
       /* At this point, we have a scalar, vector, or matrix so we know that
        * there cannot be any structure splitting still in the way.  By
        * stopping at the matrix level rather than the vector level, we
@@ -713,7 +827,10 @@ _vtn_variable_copy(struct vtn_builder *b, struct vtn_access_chain *dest,
    switch (base_type) {
    case GLSL_TYPE_UINT:
    case GLSL_TYPE_INT:
+   case GLSL_TYPE_UINT64:
+   case GLSL_TYPE_INT64:
    case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_DOUBLE:
    case GLSL_TYPE_BOOL:
       /* At this point, we have a scalar, vector, or matrix so we know that
        * there cannot be any structure splitting still in the way.  By
@@ -783,7 +900,7 @@ vtn_get_builtin_location(struct vtn_builder *b,
       *location = VARYING_SLOT_CLIP_DIST0; /* XXX CLIP_DIST1? */
       break;
    case SpvBuiltInCullDistance:
-      /* XXX figure this out */
+      *location = VARYING_SLOT_CULL_DIST0;
       break;
    case SpvBuiltInVertexIndex:
       *location = SYSTEM_VALUE_VERTEX_ID;
@@ -805,8 +922,15 @@ vtn_get_builtin_location(struct vtn_builder *b,
       set_mode_system_value(mode);
       break;
    case SpvBuiltInPrimitiveId:
-      *location = VARYING_SLOT_PRIMITIVE_ID;
-      *mode = nir_var_shader_out;
+      if (b->shader->stage == MESA_SHADER_FRAGMENT) {
+         assert(*mode == nir_var_shader_in);
+         *location = VARYING_SLOT_PRIMITIVE_ID;
+      } else if (*mode == nir_var_shader_out) {
+         *location = VARYING_SLOT_PRIMITIVE_ID;
+      } else {
+         *location = SYSTEM_VALUE_PRIMITIVE_ID;
+         set_mode_system_value(mode);
+      }
       break;
    case SpvBuiltInInvocationId:
       *location = SYSTEM_VALUE_INVOCATION_ID;
@@ -814,7 +938,12 @@ vtn_get_builtin_location(struct vtn_builder *b,
       break;
    case SpvBuiltInLayer:
       *location = VARYING_SLOT_LAYER;
-      *mode = nir_var_shader_out;
+      if (b->shader->stage == MESA_SHADER_FRAGMENT)
+         *mode = nir_var_shader_in;
+      else if (b->shader->stage == MESA_SHADER_GEOMETRY)
+         *mode = nir_var_shader_out;
+      else
+         unreachable("invalid stage for SpvBuiltInLayer");
       break;
    case SpvBuiltInViewportIndex:
       *location = VARYING_SLOT_VIEWPORT;
@@ -826,10 +955,19 @@ vtn_get_builtin_location(struct vtn_builder *b,
          unreachable("invalid stage for SpvBuiltInViewportIndex");
       break;
    case SpvBuiltInTessLevelOuter:
+      *location = VARYING_SLOT_TESS_LEVEL_OUTER;
+      break;
    case SpvBuiltInTessLevelInner:
+      *location = VARYING_SLOT_TESS_LEVEL_INNER;
+      break;
    case SpvBuiltInTessCoord:
+      *location = SYSTEM_VALUE_TESS_COORD;
+      set_mode_system_value(mode);
+      break;
    case SpvBuiltInPatchVertices:
-      unreachable("no tessellation support");
+      *location = SYSTEM_VALUE_VERTICES_IN;
+      set_mode_system_value(mode);
+      break;
    case SpvBuiltInFragCoord:
       *location = VARYING_SLOT_POS;
       assert(*mode == nir_var_shader_in);
@@ -851,8 +989,12 @@ vtn_get_builtin_location(struct vtn_builder *b,
       set_mode_system_value(mode);
       break;
    case SpvBuiltInSampleMask:
-      *location = SYSTEM_VALUE_SAMPLE_MASK_IN; /* XXX out? */
-      set_mode_system_value(mode);
+      if (*mode == nir_var_shader_out) {
+         *location = FRAG_RESULT_SAMPLE_MASK;
+      } else {
+         *location = SYSTEM_VALUE_SAMPLE_MASK_IN;
+         set_mode_system_value(mode);
+      }
       break;
    case SpvBuiltInFragDepth:
       *location = FRAG_RESULT_DEPTH;
@@ -882,6 +1024,22 @@ vtn_get_builtin_location(struct vtn_builder *b,
       *location = SYSTEM_VALUE_GLOBAL_INVOCATION_ID;
       set_mode_system_value(mode);
       break;
+   case SpvBuiltInBaseVertex:
+      *location = SYSTEM_VALUE_BASE_VERTEX;
+      set_mode_system_value(mode);
+      break;
+   case SpvBuiltInBaseInstance:
+      *location = SYSTEM_VALUE_BASE_INSTANCE;
+      set_mode_system_value(mode);
+      break;
+   case SpvBuiltInDrawIndex:
+      *location = SYSTEM_VALUE_DRAW_ID;
+      set_mode_system_value(mode);
+      break;
+   case SpvBuiltInViewIndex:
+      *location = SYSTEM_VALUE_VIEW_INDEX;
+      set_mode_system_value(mode);
+      break;
    case SpvBuiltInHelperInvocation:
    default:
       unreachable("unsupported builtin");
@@ -889,89 +1047,17 @@ vtn_get_builtin_location(struct vtn_builder *b,
 }
 
 static void
-var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
-                  const struct vtn_decoration *dec, void *void_var)
+apply_var_decoration(struct vtn_builder *b, nir_variable *nir_var,
+                     const struct vtn_decoration *dec)
 {
-   struct vtn_variable *vtn_var = void_var;
-
-   /* Handle decorations that apply to a vtn_variable as a whole */
-   switch (dec->decoration) {
-   case SpvDecorationBinding:
-      vtn_var->binding = dec->literals[0];
-      return;
-   case SpvDecorationDescriptorSet:
-      vtn_var->descriptor_set = dec->literals[0];
-      return;
-   default:
-      break;
-   }
-
-   /* Now we handle decorations that apply to a particular nir_variable */
-   nir_variable *nir_var = vtn_var->var;
-   if (val->value_type == vtn_value_type_access_chain) {
-      assert(val->access_chain->length == 0);
-      assert(val->access_chain->var == void_var);
-      assert(member == -1);
-   } else {
-      assert(val->value_type == vtn_value_type_type);
-      if (member != -1)
-         nir_var = vtn_var->members[member];
-   }
-
-   /* Location is odd in that it can apply in three different cases: To a
-    * non-split variable, to a whole split variable, or to one structure
-    * member of a split variable.
-    */
-   if (dec->decoration == SpvDecorationLocation) {
-      unsigned location = dec->literals[0];
-      bool is_vertex_input;
-      if (b->shader->stage == MESA_SHADER_FRAGMENT &&
-          vtn_var->mode == vtn_variable_mode_output) {
-         is_vertex_input = false;
-         location += FRAG_RESULT_DATA0;
-      } else if (b->shader->stage == MESA_SHADER_VERTEX &&
-                 vtn_var->mode == vtn_variable_mode_input) {
-         is_vertex_input = true;
-         location += VERT_ATTRIB_GENERIC0;
-      } else if (vtn_var->mode == vtn_variable_mode_input ||
-                 vtn_var->mode == vtn_variable_mode_output) {
-         is_vertex_input = false;
-         location += VARYING_SLOT_VAR0;
-      } else {
-         assert(!"Location must be on input or output variable");
-      }
-
-      if (nir_var) {
-         /* This handles the member and lone variable cases */
-         nir_var->data.location = location;
-         nir_var->data.explicit_location = true;
-      } else {
-         /* This handles the structure member case */
-         assert(vtn_var->members);
-         unsigned length =
-            glsl_get_length(glsl_without_array(vtn_var->type->type));
-         for (unsigned i = 0; i < length; i++) {
-            vtn_var->members[i]->data.location = location;
-            vtn_var->members[i]->data.explicit_location = true;
-            location +=
-               glsl_count_attribute_slots(vtn_var->members[i]->interface_type,
-                                          is_vertex_input);
-         }
-      }
-      return;
-   }
-
-   if (nir_var == NULL)
-      return;
-
    switch (dec->decoration) {
    case SpvDecorationRelaxedPrecision:
       break; /* FIXME: Do nothing with this for now. */
    case SpvDecorationNoPerspective:
-      nir_var->data.interpolation = INTERP_QUALIFIER_NOPERSPECTIVE;
+      nir_var->data.interpolation = INTERP_MODE_NOPERSPECTIVE;
       break;
    case SpvDecorationFlat:
-      nir_var->data.interpolation = INTERP_QUALIFIER_FLAT;
+      nir_var->data.interpolation = INTERP_MODE_FLAT;
       break;
    case SpvDecorationCentroid:
       nir_var->data.centroid = true;
@@ -986,14 +1072,17 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
       assert(nir_var->constant_initializer != NULL);
       nir_var->data.read_only = true;
       break;
+   case SpvDecorationNonReadable:
+      nir_var->data.image.write_only = true;
+      break;
    case SpvDecorationNonWritable:
       nir_var->data.read_only = true;
+      nir_var->data.image.read_only = true;
       break;
    case SpvDecorationComponent:
       nir_var->data.location_frac = dec->literals[0];
       break;
    case SpvDecorationIndex:
-      nir_var->data.explicit_index = true;
       nir_var->data.index = dec->literals[0];
       break;
    case SpvDecorationBuiltIn: {
@@ -1005,24 +1094,31 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
          nir_var->data.read_only = true;
 
          nir_constant *c = rzalloc(nir_var, nir_constant);
-         c->value.u[0] = b->shader->info.cs.local_size[0];
-         c->value.u[1] = b->shader->info.cs.local_size[1];
-         c->value.u[2] = b->shader->info.cs.local_size[2];
+         c->values[0].u32[0] = b->shader->info.cs.local_size[0];
+         c->values[0].u32[1] = b->shader->info.cs.local_size[1];
+         c->values[0].u32[2] = b->shader->info.cs.local_size[2];
          nir_var->constant_initializer = c;
          break;
       }
 
       nir_variable_mode mode = nir_var->data.mode;
       vtn_get_builtin_location(b, builtin, &nir_var->data.location, &mode);
-      nir_var->data.explicit_location = true;
       nir_var->data.mode = mode;
 
-      if (builtin == SpvBuiltInFragCoord || builtin == SpvBuiltInSamplePosition)
+      switch (builtin) {
+      case SpvBuiltInTessLevelOuter:
+      case SpvBuiltInTessLevelInner:
+         nir_var->data.compact = true;
+         break;
+      case SpvBuiltInSamplePosition:
          nir_var->data.origin_upper_left = b->origin_upper_left;
-
-      if (builtin == SpvBuiltInFragCoord)
+         /* fallthrough */
+      case SpvBuiltInFragCoord:
          nir_var->data.pixel_center_integer = b->pixel_center_integer;
-      break;
+         break;
+      default:
+         break;
+      }
    }
 
    case SpvDecorationSpecId:
@@ -1033,7 +1129,6 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
    case SpvDecorationAliased:
    case SpvDecorationVolatile:
    case SpvDecorationCoherent:
-   case SpvDecorationNonReadable:
    case SpvDecorationUniform:
    case SpvDecorationStream:
    case SpvDecorationOffset:
@@ -1041,7 +1136,7 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
       break; /* Do nothing with these here */
 
    case SpvDecorationPatch:
-      vtn_warn("Tessellation not yet supported");
+      nir_var->data.patch = true;
       break;
 
    case SpvDecorationLocation:
@@ -1074,58 +1169,138 @@ var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
    case SpvDecorationFPRoundingMode:
    case SpvDecorationFPFastMathMode:
    case SpvDecorationAlignment:
-      vtn_warn("Decoraiton only allowed for CL-style kernels: %s",
+      vtn_warn("Decoration only allowed for CL-style kernels: %s",
                spirv_decoration_to_string(dec->decoration));
       break;
+
+   default:
+      unreachable("Unhandled decoration");
    }
 }
 
-/* Tries to compute the size of an interface block based on the strides and
- * offsets that are provided to us in the SPIR-V source.
- */
-static unsigned
-vtn_type_block_size(struct vtn_type *type)
+static void
+var_is_patch_cb(struct vtn_builder *b, struct vtn_value *val, int member,
+                const struct vtn_decoration *dec, void *out_is_patch)
 {
-   enum glsl_base_type base_type = glsl_get_base_type(type->type);
-   switch (base_type) {
-   case GLSL_TYPE_UINT:
-   case GLSL_TYPE_INT:
-   case GLSL_TYPE_FLOAT:
-   case GLSL_TYPE_BOOL:
-   case GLSL_TYPE_DOUBLE: {
-      unsigned cols = type->row_major ? glsl_get_vector_elements(type->type) :
-                                        glsl_get_matrix_columns(type->type);
-      if (cols > 1) {
-         assert(type->stride > 0);
-         return type->stride * cols;
-      } else if (base_type == GLSL_TYPE_DOUBLE) {
-         return glsl_get_vector_elements(type->type) * 8;
-      } else {
-         return glsl_get_vector_elements(type->type) * 4;
-      }
+   if (dec->decoration == SpvDecorationPatch) {
+      *((bool *) out_is_patch) = true;
    }
+}
 
-   case GLSL_TYPE_STRUCT:
-   case GLSL_TYPE_INTERFACE: {
-      unsigned size = 0;
-      unsigned num_fields = glsl_get_length(type->type);
-      for (unsigned f = 0; f < num_fields; f++) {
-         unsigned field_end = type->offsets[f] +
-                              vtn_type_block_size(type->members[f]);
-         size = MAX2(size, field_end);
-      }
-      return size;
-   }
+static void
+var_decoration_cb(struct vtn_builder *b, struct vtn_value *val, int member,
+                  const struct vtn_decoration *dec, void *void_var)
+{
+   struct vtn_variable *vtn_var = void_var;
 
-   case GLSL_TYPE_ARRAY:
-      assert(type->stride > 0);
-      assert(glsl_get_length(type->type) > 0);
-      return type->stride * glsl_get_length(type->type);
-
+   /* Handle decorations that apply to a vtn_variable as a whole */
+   switch (dec->decoration) {
+   case SpvDecorationBinding:
+      vtn_var->binding = dec->literals[0];
+      return;
+   case SpvDecorationDescriptorSet:
+      vtn_var->descriptor_set = dec->literals[0];
+      return;
+   case SpvDecorationInputAttachmentIndex:
+      vtn_var->input_attachment_index = dec->literals[0];
+      return;
+   case SpvDecorationPatch:
+      vtn_var->patch = true;
+      break;
    default:
-      assert(!"Invalid block type");
-      return 0;
+      break;
    }
+
+   if (val->value_type == vtn_value_type_access_chain) {
+      assert(val->access_chain->length == 0);
+      assert(val->access_chain->var == void_var);
+      assert(member == -1);
+   } else {
+      assert(val->value_type == vtn_value_type_type);
+   }
+
+   /* Location is odd.  If applied to a split structure, we have to walk the
+    * whole thing and accumulate the location.  It's easier to handle as a
+    * special case.
+    */
+   if (dec->decoration == SpvDecorationLocation) {
+      unsigned location = dec->literals[0];
+      bool is_vertex_input;
+      if (b->shader->stage == MESA_SHADER_FRAGMENT &&
+          vtn_var->mode == vtn_variable_mode_output) {
+         is_vertex_input = false;
+         location += FRAG_RESULT_DATA0;
+      } else if (b->shader->stage == MESA_SHADER_VERTEX &&
+                 vtn_var->mode == vtn_variable_mode_input) {
+         is_vertex_input = true;
+         location += VERT_ATTRIB_GENERIC0;
+      } else if (vtn_var->mode == vtn_variable_mode_input ||
+                 vtn_var->mode == vtn_variable_mode_output) {
+         is_vertex_input = false;
+         location += vtn_var->patch ? VARYING_SLOT_PATCH0 : VARYING_SLOT_VAR0;
+      } else {
+         vtn_warn("Location must be on input or output variable");
+         return;
+      }
+
+      if (vtn_var->var) {
+         /* This handles the member and lone variable cases */
+         vtn_var->var->data.location = location;
+      } else {
+         /* This handles the structure member case */
+         assert(vtn_var->members);
+         unsigned length =
+            glsl_get_length(glsl_without_array(vtn_var->type->type));
+         for (unsigned i = 0; i < length; i++) {
+            vtn_var->members[i]->data.location = location;
+            location +=
+               glsl_count_attribute_slots(vtn_var->members[i]->interface_type,
+                                          is_vertex_input);
+         }
+      }
+      return;
+   } else {
+      if (vtn_var->var) {
+         assert(member <= 0);
+         apply_var_decoration(b, vtn_var->var, dec);
+      } else if (vtn_var->members) {
+         if (member >= 0) {
+            assert(vtn_var->members);
+            apply_var_decoration(b, vtn_var->members[member], dec);
+         } else {
+            unsigned length =
+               glsl_get_length(glsl_without_array(vtn_var->type->type));
+            for (unsigned i = 0; i < length; i++)
+               apply_var_decoration(b, vtn_var->members[i], dec);
+         }
+      } else {
+         /* A few variables, those with external storage, have no actual
+          * nir_variables associated with them.  Fortunately, all decorations
+          * we care about for those variables are on the type only.
+          */
+         assert(vtn_var->mode == vtn_variable_mode_ubo ||
+                vtn_var->mode == vtn_variable_mode_ssbo ||
+                vtn_var->mode == vtn_variable_mode_push_constant);
+      }
+   }
+}
+
+static bool
+is_per_vertex_inout(const struct vtn_variable *var, gl_shader_stage stage)
+{
+   if (var->patch || !glsl_type_is_array(var->type->type))
+      return false;
+
+   if (var->mode == vtn_variable_mode_input) {
+      return stage == MESA_SHADER_TESS_CTRL ||
+             stage == MESA_SHADER_TESS_EVAL ||
+             stage == MESA_SHADER_GEOMETRY;
+   }
+
+   if (var->mode == vtn_variable_mode_output)
+      return stage == MESA_SHADER_TESS_CTRL;
+
+   return false;
 }
 
 void
@@ -1133,6 +1308,12 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
                      const uint32_t *w, unsigned count)
 {
    switch (opcode) {
+   case SpvOpUndef: {
+      struct vtn_value *val = vtn_push_value(b, w[2], vtn_value_type_undef);
+      val->type = vtn_value(b, w[1], vtn_value_type_type)->type;
+      break;
+   }
+
    case SpvOpVariable: {
       struct vtn_variable *var = rzalloc(b, struct vtn_variable);
       var->type = vtn_value(b, w[1], vtn_value_type_type)->type;
@@ -1173,7 +1354,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
       case SpvStorageClassPushConstant:
          var->mode = vtn_variable_mode_push_constant;
          assert(b->shader->num_uniforms == 0);
-         b->shader->num_uniforms = vtn_type_block_size(var->type) * 4;
+         b->shader->num_uniforms = vtn_type_block_size(var->type);
          break;
       case SpvStorageClassInput:
          var->mode = vtn_variable_mode_input;
@@ -1227,6 +1408,30 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
 
       case vtn_variable_mode_input:
       case vtn_variable_mode_output: {
+         /* In order to know whether or not we're a per-vertex inout, we need
+          * the patch qualifier.  This means walking the variable decorations
+          * early before we actually create any variables.  Not a big deal.
+          *
+          * GLSLang really likes to place decorations in the most interior
+          * thing it possibly can.  In particular, if you have a struct, it
+          * will place the patch decorations on the struct members.  This
+          * should be handled by the variable splitting below just fine.
+          *
+          * If you have an array-of-struct, things get even more weird as it
+          * will place the patch decorations on the struct even though it's
+          * inside an array and some of the members being patch and others not
+          * makes no sense whatsoever.  Since the only sensible thing is for
+          * it to be all or nothing, we'll call it patch if any of the members
+          * are declared patch.
+          */
+         var->patch = false;
+         vtn_foreach_decoration(b, val, var_is_patch_cb, &var->patch);
+         if (glsl_type_is_array(var->type->type) &&
+             glsl_type_is_struct(without_array->type)) {
+            vtn_foreach_decoration(b, without_array->val,
+                                   var_is_patch_cb, &var->patch);
+         }
+
          /* For inputs and outputs, we immediately split structures.  This
           * is for a couple of reasons.  For one, builtins may all come in
           * a struct and we really want those split out into separate
@@ -1237,8 +1442,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
 
          int array_length = -1;
          struct vtn_type *interface_type = var->type;
-         if (b->shader->stage == MESA_SHADER_GEOMETRY &&
-             glsl_type_is_array(var->type->type)) {
+         if (is_per_vertex_inout(var, b->shader->stage)) {
             /* In Geometry shaders (and some tessellation), inputs come
              * in per-vertex arrays.  However, some builtins come in
              * non-per-vertex, hence the need for the is_array check.  In
@@ -1266,6 +1470,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
                var->members[i]->interface_type =
                   interface_type->members[i]->type;
                var->members[i]->data.mode = nir_mode;
+               var->members[i]->data.patch = var->patch;
             }
          } else {
             var->var = rzalloc(b->shader, nir_variable);
@@ -1273,6 +1478,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
             var->var->type = var->type->type;
             var->var->interface_type = interface_type->type;
             var->var->data.mode = nir_mode;
+            var->var->data.patch = var->patch;
          }
 
          /* For inputs and outputs, we need to grab locations and builtin
@@ -1309,6 +1515,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
           */
          var->var->data.binding = var->binding;
          var->var->data.descriptor_set = var->descriptor_set;
+         var->var->data.index = var->input_attachment_index;
 
          if (var->mode == vtn_variable_mode_image)
             var->var->data.image.format = without_array->image_format;
@@ -1358,7 +1565,7 @@ vtn_handle_variables(struct vtn_builder *b, SpvOp opcode,
          struct vtn_value *link_val = vtn_untyped_value(b, w[i]);
          if (link_val->value_type == vtn_value_type_constant) {
             chain->link[idx].mode = vtn_access_mode_literal;
-            chain->link[idx].id = link_val->constant->value.u[0];
+            chain->link[idx].id = link_val->constant->values[0].u32[0];
          } else {
             chain->link[idx].mode = vtn_access_mode_id;
             chain->link[idx].id = w[i];

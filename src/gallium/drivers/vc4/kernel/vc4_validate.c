@@ -640,6 +640,13 @@ reloc_tex(struct vc4_exec_info *exec,
 		cpp = 1;
 		break;
 	case VC4_TEXTURE_TYPE_ETC1:
+		/* ETC1 is arranged as 64-bit blocks, where each block is 4x4
+		 * pixels.
+		 */
+		cpp = 8;
+		width = (width + 3) >> 2;
+		height = (height + 3) >> 2;
+		break;
 	case VC4_TEXTURE_TYPE_BW1:
 	case VC4_TEXTURE_TYPE_A4:
 	case VC4_TEXTURE_TYPE_A1:
@@ -773,11 +780,6 @@ validate_gl_shader_rec(struct drm_device *dev,
 	exec->shader_rec_v += roundup(packet_size, 16);
 	exec->shader_rec_size -= packet_size;
 
-	if (!(*(uint16_t *)pkt_u & VC4_SHADER_FLAG_FS_SINGLE_THREAD)) {
-		DRM_ERROR("Multi-threaded fragment shaders not supported.\n");
-		return -EINVAL;
-	}
-
 	for (i = 0; i < shader_reloc_count; i++) {
 		if (src_handles[i] > exec->bo_count) {
 			DRM_ERROR("Shader handle %d too big\n", src_handles[i]);
@@ -794,13 +796,25 @@ validate_gl_shader_rec(struct drm_device *dev,
 			return -EINVAL;
 	}
 
+	if (((*(uint16_t *)pkt_u & VC4_SHADER_FLAG_FS_SINGLE_THREAD) == 0) !=
+	    to_vc4_bo(&bo[0]->base)->validated_shader->is_threaded) {
+		DRM_ERROR("Thread mode of CL and FS do not match\n");
+		return -EINVAL;
+	}
+
+	if (to_vc4_bo(&bo[1]->base)->validated_shader->is_threaded ||
+	    to_vc4_bo(&bo[2]->base)->validated_shader->is_threaded) {
+		DRM_ERROR("cs and vs cannot be threaded\n");
+		return -EINVAL;
+	}
+
 	for (i = 0; i < shader_reloc_count; i++) {
 		struct vc4_validated_shader_info *validated_shader;
 		uint32_t o = shader_reloc_offsets[i];
 		uint32_t src_offset = *(uint32_t *)(pkt_u + o);
 		uint32_t *texture_handles_u;
 		void *uniform_data_u;
-		uint32_t tex;
+		uint32_t tex, uni;
 
 		*(uint32_t *)(pkt_v + o) = bo[i]->paddr + src_offset;
 
@@ -836,6 +850,17 @@ validate_gl_shader_rec(struct drm_device *dev,
 				       texture_handles_u[tex])) {
 				return -EINVAL;
 			}
+		}
+
+		/* Fill in the uniform slots that need this shader's
+		 * start-of-uniforms address (used for resetting the uniform
+		 * stream in the presence of control flow).
+		 */
+		for (uni = 0;
+		     uni < validated_shader->num_uniform_addr_offsets;
+		     uni++) {
+			uint32_t o = validated_shader->uniform_addr_offsets[uni];
+			((uint32_t *)exec->uniforms_v)[o] = exec->uniforms_p;
 		}
 
 		*(uint32_t *)(pkt_v + o + 4) = exec->uniforms_p;

@@ -37,6 +37,7 @@
 #include "util/u_math.h"
 #include "util/u_memory.h"
 #include "util/u_transfer.h"
+#include "util/u_surface.h"
 
 #include "sp_context.h"
 #include "sp_flush.h"
@@ -251,6 +252,7 @@ softpipe_resource_from_handle(struct pipe_screen *screen,
 
 static boolean
 softpipe_resource_get_handle(struct pipe_screen *screen,
+                             struct pipe_context *ctx,
                              struct pipe_resource *pt,
                              struct winsys_handle *whandle,
                              unsigned usage)
@@ -514,10 +516,12 @@ softpipe_init_texture_funcs(struct pipe_context *pipe)
    pipe->transfer_unmap = softpipe_transfer_unmap;
 
    pipe->transfer_flush_region = u_default_transfer_flush_region;
-   pipe->transfer_inline_write = u_default_transfer_inline_write;
+   pipe->buffer_subdata = u_default_buffer_subdata;
+   pipe->texture_subdata = u_default_texture_subdata;
 
    pipe->create_surface = softpipe_create_surface;
    pipe->surface_destroy = softpipe_surface_destroy;
+   pipe->clear_texture = util_clear_texture;
 }
 
 

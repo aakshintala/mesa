@@ -134,7 +134,10 @@ lower_color(lower_drawpixels_state *state, nir_intrinsic_instr *intr)
    tex->sampler_index = state->options->drawpix_sampler;
    tex->texture_index = state->options->drawpix_sampler;
    tex->dest_type = nir_type_float;
-   tex->src[0].src = nir_src_for_ssa(texcoord);
+   tex->src[0].src_type = nir_tex_src_coord;
+   tex->src[0].src =
+      nir_src_for_ssa(nir_channels(b, texcoord,
+                                   (1 << tex->coord_components) - 1));
 
    nir_ssa_dest_init(&tex->instr, &tex->dest, 4, 32, NULL);
    nir_builder_instr_insert(b, &tex->instr);
@@ -161,6 +164,7 @@ lower_color(lower_drawpixels_state *state, nir_intrinsic_instr *intr)
       tex->sampler_index = state->options->pixelmap_sampler;
       tex->texture_index = state->options->pixelmap_sampler;
       tex->dest_type = nir_type_float;
+      tex->src[0].src_type = nir_tex_src_coord;
       tex->src[0].src = nir_src_for_ssa(nir_swizzle(b, def, swiz_xy, 2, true));
 
       nir_ssa_dest_init(&tex->instr, &tex->dest, 4, 32, NULL);
@@ -174,6 +178,7 @@ lower_color(lower_drawpixels_state *state, nir_intrinsic_instr *intr)
       tex->coord_components = 2;
       tex->sampler_index = state->options->pixelmap_sampler;
       tex->dest_type = nir_type_float;
+      tex->src[0].src_type = nir_tex_src_coord;
       tex->src[0].src = nir_src_for_ssa(nir_swizzle(b, def, swiz_zw, 2, true));
 
       nir_ssa_dest_init(&tex->instr, &tex->dest, 4, 32, NULL);
@@ -194,6 +199,8 @@ lower_color(lower_drawpixels_state *state, nir_intrinsic_instr *intr)
 static void
 lower_texcoord(lower_drawpixels_state *state, nir_intrinsic_instr *intr)
 {
+   state->b.cursor = nir_before_instr(&intr->instr);
+
    nir_ssa_def *texcoord_const = get_texcoord_const(state);
    nir_ssa_def_rewrite_uses(&intr->dest.ssa, nir_src_for_ssa(texcoord_const));
 }
@@ -209,11 +216,11 @@ lower_drawpixels_block(lower_drawpixels_state *state, nir_block *block)
             nir_variable *var = dvar->var;
 
             if (var->data.location == VARYING_SLOT_COL0) {
-               /* gl_FragCoord should not have array/struct deref's: */
+               /* gl_Color should not have array/struct derefs: */
                assert(dvar->deref.child == NULL);
                lower_color(state, intr);
             } else if (var->data.location == VARYING_SLOT_TEX0) {
-               /* gl_TexCoord should not have array/struct deref's: */
+               /* gl_TexCoord should not have array/struct derefs: */
                assert(dvar->deref.child == NULL);
                lower_texcoord(state, intr);
             }

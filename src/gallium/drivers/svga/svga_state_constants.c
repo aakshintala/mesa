@@ -65,7 +65,7 @@
 static unsigned
 svga_get_extra_constants_common(struct svga_context *svga,
                                 const struct svga_shader_variant *variant,
-                                unsigned shader, float *dest)
+                                enum pipe_shader_type shader, float *dest)
 {
    uint32_t *dest_u = (uint32_t *) dest;  // uint version of dest
    unsigned i;
@@ -264,50 +264,6 @@ svga_get_extra_gs_constants(struct svga_context *svga, float *dest)
    return count;
 }
 
-/**
- * Check and emit one shader constant register.
- * \param shader  PIPE_SHADER_FRAGMENT or PIPE_SHADER_VERTEX
- * \param i  which float[4] constant to change
- * \param value  the new float[4] value
- */
-static enum pipe_error
-emit_const(struct svga_context *svga, unsigned shader, unsigned i,
-           const float *value)
-{
-   enum pipe_error ret = PIPE_OK;
-
-   assert(shader < PIPE_SHADER_TYPES);
-   assert(i < SVGA3D_CONSTREG_MAX);
-   assert(!svga_have_vgpu10(svga));
-
-   if (memcmp(svga->state.hw_draw.cb[shader][i], value,
-              4 * sizeof(float)) != 0) {
-      if (SVGA_DEBUG & DEBUG_CONSTS)
-         debug_printf("%s %s %u: %f %f %f %f\n",
-                      __FUNCTION__,
-                      shader == PIPE_SHADER_VERTEX ? "VERT" : "FRAG",
-                      i,
-                      value[0],
-                      value[1],
-                      value[2],
-                      value[3]);
-
-      ret = SVGA3D_SetShaderConst( svga->swc,
-                                   i,
-                                   svga_shader_type(shader),
-                                   SVGA3D_CONST_TYPE_FLOAT,
-                                   value );
-      if (ret != PIPE_OK)
-         return ret;
-
-      memcpy(svga->state.hw_draw.cb[shader][i], value, 4 * sizeof(float));
-
-      svga->hud.num_const_updates++;
-   }
-
-   return ret;
-}
-
 
 /*
  * Check and emit a range of shader constant registers, trying to coalesce
@@ -316,7 +272,7 @@ emit_const(struct svga_context *svga, unsigned shader, unsigned i,
  */
 static enum pipe_error
 emit_const_range(struct svga_context *svga,
-                 unsigned shader,
+                 enum pipe_shader_type shader,
                  unsigned offset,
                  unsigned count,
                  const float (*values)[4])
@@ -439,14 +395,12 @@ emit_const_range(struct svga_context *svga,
  * On VGPU10, emit_consts_vgpu10 is used instead.
  */
 static enum pipe_error
-emit_consts_vgpu9(struct svga_context *svga, unsigned shader)
+emit_consts_vgpu9(struct svga_context *svga, enum pipe_shader_type shader)
 {
    const struct pipe_constant_buffer *cbuf;
-   struct svga_screen *ss = svga_screen(svga->pipe.screen);
    struct pipe_transfer *transfer = NULL;
    unsigned count;
    const float (*data)[4] = NULL;
-   unsigned i;
    enum pipe_error ret = PIPE_OK;
    const unsigned offset = 0;
 
@@ -469,24 +423,13 @@ emit_consts_vgpu9(struct svga_context *svga, unsigned shader)
       }
 
       /* sanity check */
-      assert(cbuf->buffer->width0 >=
-             cbuf->buffer_size);
+      assert(cbuf->buffer->width0 >= cbuf->buffer_size);
 
       /* Use/apply the constant buffer size and offsets here */
       count = cbuf->buffer_size / (4 * sizeof(float));
       data += cbuf->buffer_offset / (4 * sizeof(float));
 
-      if (ss->hw_version >= SVGA3D_HWVERSION_WS8_B1) {
-         ret = emit_const_range( svga, shader, offset, count, data );
-      }
-      else {
-         for (i = 0; i < count; i++) {
-            ret = emit_const( svga, shader, offset + i, data[i] );
-            if (ret != PIPE_OK) {
-               break;
-            }
-         }
-      }
+      ret = emit_const_range( svga, shader, offset, count, data );
 
       pipe_buffer_unmap(&svga->pipe, transfer);
 
@@ -500,7 +443,7 @@ emit_consts_vgpu9(struct svga_context *svga, unsigned shader)
       const struct svga_shader_variant *variant = NULL;
       unsigned offset;
       float extras[MAX_EXTRA_CONSTS][4];
-      unsigned count, i;
+      unsigned count;
 
       switch (shader) {
       case PIPE_SHADER_VERTEX:
@@ -521,17 +464,8 @@ emit_consts_vgpu9(struct svga_context *svga, unsigned shader)
       assert(count <= ARRAY_SIZE(extras));
 
       if (count > 0) {
-         if (ss->hw_version >= SVGA3D_HWVERSION_WS8_B1) {
-            ret = emit_const_range(svga, shader, offset, count,
-                                   (const float (*) [4])extras);
-         }
-         else {
-            for (i = 0; i < count; i++) {
-               ret = emit_const(svga, shader, offset + i, extras[i]);
-               if (ret != PIPE_OK)
-                  return ret;
-            }
-         }
+         ret = emit_const_range(svga, shader, offset, count,
+                                (const float (*) [4])extras);
       }
    }
 
@@ -541,7 +475,7 @@ emit_consts_vgpu9(struct svga_context *svga, unsigned shader)
 
 
 static enum pipe_error
-emit_constbuf_vgpu10(struct svga_context *svga, unsigned shader)
+emit_constbuf_vgpu10(struct svga_context *svga, enum pipe_shader_type shader)
 {
    const struct pipe_constant_buffer *cbuf;
    struct pipe_resource *dst_buffer = NULL;
@@ -646,15 +580,29 @@ emit_constbuf_vgpu10(struct svga_context *svga, unsigned shader)
       assert(extra_offset + extra_size <= new_buf_size);
       memcpy((char *) dst_map + extra_offset, extras, extra_size);
    }
-   u_upload_unmap(svga->const0_upload);
 
-   /* Issue the SetSingleConstantBuffer command */
-   dst_handle = svga_buffer_handle(svga, dst_buffer);
-   if (!dst_handle) {
-      pipe_resource_reference(&dst_buffer, NULL);
-      return PIPE_ERROR_OUT_OF_MEMORY;
+   /* Get winsys handle for the constant buffer */
+   if (svga->state.hw_draw.const0_buffer == dst_buffer &&
+       svga->state.hw_draw.const0_handle) {
+      /* re-reference already mapped buffer */
+      dst_handle = svga->state.hw_draw.const0_handle;
+   }
+   else {
+      /* we must unmap the buffer before getting the winsys handle */
+      u_upload_unmap(svga->const0_upload);
+
+      dst_handle = svga_buffer_handle(svga, dst_buffer);
+      if (!dst_handle) {
+         pipe_resource_reference(&dst_buffer, NULL);
+         return PIPE_ERROR_OUT_OF_MEMORY;
+      }
+
+      /* save the buffer / handle for next time */
+      pipe_resource_reference(&svga->state.hw_draw.const0_buffer, dst_buffer);
+      svga->state.hw_draw.const0_handle = dst_handle;
    }
 
+   /* Issue the SetSingleConstantBuffer command */
    assert(new_buf_size % 16 == 0);
    ret = SVGA3D_vgpu10_SetSingleConstantBuffer(svga->swc,
                                                0, /* index */
@@ -686,7 +634,7 @@ emit_constbuf_vgpu10(struct svga_context *svga, unsigned shader)
 
 
 static enum pipe_error
-emit_consts_vgpu10(struct svga_context *svga, unsigned shader)
+emit_consts_vgpu10(struct svga_context *svga, enum pipe_shader_type shader)
 {
    enum pipe_error ret;
    unsigned dirty_constbufs;
