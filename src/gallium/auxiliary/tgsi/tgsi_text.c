@@ -1842,7 +1842,9 @@ static boolean translate( struct translate_ctx *ctx )
          return FALSE;
       }
 
-      if (*ctx->cur == '\0')
+      // Exit if end of string or if we see EOF.
+      // FIXME: Currently will exit on first occurrnece of junk as well. Might not be a good idea.
+      if (*ctx->cur == '\0' || *ctx->cur == '\377' || *ctx->cur > '\127')
          break;
       if (parse_label( ctx, &label_val )) {
          if (!parse_instruction( ctx, TRUE ))

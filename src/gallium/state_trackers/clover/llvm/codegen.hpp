@@ -58,6 +58,10 @@ namespace clover {
                           const clang::CompilerInstance &c,
                           std::string &r_log);
 
+      module
+      build_module_tgsi(::llvm::Module &mod, const target &target,
+                          const clang::CompilerInstance &c,
+                          std::string &r_log);
       std::string
       print_module_native(const ::llvm::Module &mod, const target &target);
 
@@ -66,6 +70,11 @@ namespace clover {
                           const std::vector<char> &code,
                           const std::map<std::string, unsigned> &offsets,
                           const clang::CompilerInstance &c);
+      module
+      build_tgsi_common(const ::llvm::Module &mod,
+                        const std::vector<char> &code,
+                        const clang::CompilerInstance &c,
+			std::string &r_log);
    }
 }
 

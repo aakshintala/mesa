@@ -151,6 +151,15 @@ clover::llvm::build_module_native(::llvm::Module &mod, const target &target,
    return build_module_common(mod, code, get_symbol_offsets(code, r_log), c);
 }
 
+module
+clover::llvm::build_module_tgsi(::llvm::Module &mod, const target &target,
+                                  const clang::CompilerInstance &c,
+                                  std::string &r_log) {
+   const auto code = emit_code(mod, target,
+                               TargetMachine::CGFT_AssemblyFile, r_log);
+   return build_tgsi_common(mod, code, c, r_log);
+}
+
 std::string
 clover::llvm::print_module_native(const ::llvm::Module &mod,
                                   const target &target) {

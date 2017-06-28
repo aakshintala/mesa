@@ -89,12 +89,18 @@ namespace clover {
       }
 
       struct target {
-         target(const std::string &s) :
-            cpu(s.begin(), s.begin() + s.find_first_of("-")),
-            triple(s.begin() + s.find_first_of("-") + 1, s.end()) {}
-
          std::string cpu;
          std::string triple;
+
+         target(const std::string &s) :
+            cpu(s.begin(), s.begin() + s.find_first_of("-")),
+            triple(s.begin() + s.find_first_of("-") + 1, s.end()) 
+            {
+               if(s == "tgsi--") {
+                  this->cpu = "";
+                  this->triple = "tgsi--";
+		         }
+            }
       };
 
       namespace debug {

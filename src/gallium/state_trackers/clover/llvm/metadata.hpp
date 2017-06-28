@@ -34,6 +34,7 @@
 #include <vector>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/IR/Constants.h>
 
 namespace clover {
    namespace llvm {
@@ -96,6 +97,21 @@ namespace clover {
             return range(data_node->op_begin() + 1, data_node->op_end());
 #endif
          }
+      }
+
+      ///
+      /// TGSI Specific Metadata Parsing
+      ///
+      unsigned get_kernel_metadata_int(const ::llvm::Function &kernel_func,
+                                       ::llvm::StringRef name) {
+         const ::llvm::MDNode *md_node;
+
+         md_node = kernel_func.getMetadata(name);
+         assert(md_node);
+
+         ::llvm::ConstantInt *val = ::llvm::mdconst::dyn_extract<::llvm::ConstantInt>(
+                                  md_node->getOperand(0));
+         return val->getZExtValue();
       }
 
       ///

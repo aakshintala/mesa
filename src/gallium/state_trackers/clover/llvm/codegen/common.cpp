@@ -36,7 +36,10 @@
 #include "CL/cl.h"
 
 #include "pipe/p_state.h"
+#include "pipe/p_shader_tokens.h"
 #include "util/u_math.h"
+#include "tgsi/tgsi_parse.h"
+#include "tgsi/tgsi_text.h"
 
 #include <clang/Basic/TargetInfo.h>
 
@@ -206,5 +209,39 @@ clover::llvm::build_module_common(const Module &mod,
    }
 
    m.secs.push_back(make_text_section(code));
+   return m;
+}
+
+module
+clover::llvm::build_tgsi_common( const Module &mod,
+                                 const std::vector<char> &code,
+                                 const clang::CompilerInstance &c,
+                                 std::string &r_log) {
+   module m;
+
+   std::map<std::string, unsigned> offsets;
+  
+   auto kernels = get_kernels(mod);
+   for (unsigned i = 0; i < kernels.size(); ++i) {
+      auto kernel_name = kernels[i]->getName();
+      offsets[kernel_name] = get_kernel_metadata_int(*kernels[i], "tgsi_kernel_start"); 
+   }
+ 
+   for (const auto &name : map(std::mem_fn(&Function::getName),
+                               get_kernels(mod))) {
+      if (offsets.count(name))
+         m.syms.emplace_back(name, 0, offsets.at(name),
+                             make_kernel_args(mod, name, c));
+   }
+
+   struct tgsi_token prog[1024];
+   if (!tgsi_text_translate(&code[0], prog, ARRAY_SIZE(prog))) {
+      fail(r_log, build_error(),"Couldn't translate TGSI.");
+   }
+
+   unsigned sz = tgsi_num_tokens(prog) * sizeof(struct tgsi_token);
+   std::vector<char> data( (char *)prog, (char *)prog + sz );
+   m.secs.push_back({ 0, module::section::text_executable, sz, data });
+
    return m;
 }

@@ -300,6 +300,9 @@ clover::llvm::link_program(const std::vector<module> &modules,
 
       return build_module_native(*mod, target, *c, r_log);
 
+   } else if (ir == PIPE_SHADER_IR_TGSI) {
+      return build_module_tgsi(*mod, target, *c, r_log);
+
    } else {
       unreachable("Unsupported IR.");
    }
