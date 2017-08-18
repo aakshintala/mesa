@@ -31,6 +31,7 @@
 #include "llvm/compat.hpp"
 #include "llvm/util.hpp"
 #include "core/error.hpp"
+#include "util/u_debug.h"
 
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Support/TargetRegistry.h>
@@ -137,7 +138,7 @@ namespace {
 
          pm.run(mod);
       }
-
+      data.append(1,'\0');
       return { data.begin(), data.end() };
    }
 }
@@ -157,6 +158,9 @@ clover::llvm::build_module_tgsi(::llvm::Module &mod, const target &target,
                                   std::string &r_log) {
    const auto code = emit_code(mod, target,
                                TargetMachine::CGFT_AssemblyFile, r_log);
+  
+   if (debug::has_flag(debug::tgsi))
+      debug::log(".tgsi", as_string(code)); 
    return build_tgsi_common(mod, code, c, r_log);
 }
 

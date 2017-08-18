@@ -102,7 +102,8 @@ namespace clover {
       ///
       /// TGSI Specific Metadata Parsing
       ///
-      unsigned get_kernel_metadata_int(const ::llvm::Function &kernel_func,
+      inline unsigned 
+      get_kernel_metadata_int(const ::llvm::Function &kernel_func,
                                        ::llvm::StringRef name) {
          const ::llvm::MDNode *md_node;
 

@@ -121,6 +121,11 @@ namespace {
                               module::argument::zero_ext,
                               module::argument::image_format);
 
+         } else if (type_name == "sampler_t") {
+            args.emplace_back(module::argument::sampler, sizeof(cl_sampler),
+                              dl.getTypeStoreSize(size_type),
+                              dl.getABITypeAlignment(size_type),
+                              module::argument::zero_ext);
          } else {
             // Other types.
             const auto actual_type =
@@ -149,6 +154,15 @@ namespace {
                                     module::argument::zero_ext);
                }
 
+            } else if(actual_type->isStructTy()) {
+               const bool needs_sign_ext = f.getAttributes().hasAttribute(
+                  arg.getArgNo() + 1, ::llvm::Attribute::SExt);
+               
+               args.emplace_back(module::argument::scalar, dl.getTypeAllocSize(actual_type),
+                                 dl.getTypeStoreSize(actual_type), dl.getABITypeAlignment(actual_type),
+                                 (needs_sign_ext ? module::argument::sign_ext :
+                                  module::argument::zero_ext));
+               
             } else {
                const bool needs_sign_ext = f.getAttributes().hasAttribute(
                   arg.getArgNo() + 1, ::llvm::Attribute::SExt);

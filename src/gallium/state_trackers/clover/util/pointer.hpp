@@ -24,27 +24,53 @@
 #define CLOVER_UTIL_POINTER_HPP
 
 #include <atomic>
+#include "util/u_debug.h"
+#include <execinfo.h>
 
 namespace clover {
+
+   inline void
+   dump_stack() { 
+      void *array[25];
+      unsigned int size;
+      char **strings = NULL;
+
+      size = backtrace(array, 25);
+      strings = backtrace_symbols(array, size);
+      if (strings != NULL) {
+         _debug_printf("Stacktrace:\n");
+         for (unsigned int i = 0; i < size; i++)
+            _debug_printf("%s\n", strings[i]);
+      }
+   }
    ///
    /// Base class for objects that support reference counting.
    ///
    class ref_counter {
    public:
-      ref_counter(unsigned value = 1) : _ref_count(value) {}
+      ref_counter(unsigned value = 1) : _ref_count(value) {
+         //_debug_printf("ref_counter Initialized. Value = %u %x\n", (int)_ref_count, this);
+         //dump_stack();
+      }
 
       unsigned
       ref_count() const {
+         //_debug_printf("ref_count called. Returning %u %x\n",(int)_ref_count, this);
+         //dump_stack();
          return _ref_count;
       }
 
       void
       retain() {
          _ref_count++;
+         //_debug_printf("retain() called. Value = %u %x\n",(int)_ref_count, this);
+         //dump_stack();
       }
 
       bool
       release() {
+         //_debug_printf("release called. Value will be %u %x\n",(int)_ref_count-1, this);
+         //dump_stack();
          return (--_ref_count) == 0;
       }
 
@@ -174,7 +200,11 @@ namespace clover {
    class intrusive_ref {
    public:
       intrusive_ref(T &o) : p(&o) {
+         //_debug_printf("intrusive_ref constructed. Value before calling retain = %u %x\n", (int)p->ref_count(), this->p);
+         //dump_stack();
          p->retain();
+         //_debug_printf("intrusive_ref constructed. Value after calling retain = %u %x\n", (int)p->ref_count(), this->p);
+         //dump_stack();
       }
 
       intrusive_ref(const intrusive_ref &ref) :
@@ -187,6 +217,10 @@ namespace clover {
       }
 
       ~intrusive_ref() {
+         if (p) {
+           // _debug_printf("intrusive_ref destroyed. Value before calling release() = %u %x\n",(int) p->ref_count(), this->p); 
+            //dump_stack();
+         }
          if (p && p->release())
             delete p;
       }
