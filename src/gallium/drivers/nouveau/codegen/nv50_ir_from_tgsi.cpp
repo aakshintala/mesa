@@ -2068,9 +2068,9 @@ Converter::fetchSrc(tgsi::Instruction::SrcRegister src, int c, Value *ptr)
       return ld->getDef(0);
    case TGSI_FILE_SYSTEM_VALUE:
       assert(!ptr);
-      if (info->sv[idx].sn == TGSI_SEMANTIC_THREAD_ID &&
-          info->prop.cp.numThreads[swz] == 1)
-         return loadImm(NULL, 0u);
+      //if (info->sv[idx].sn == TGSI_SEMANTIC_THREAD_ID &&
+      //    info->prop.cp.numThreads[swz] == 1)
+      //   return loadImm(NULL, 0u);
       if (isSubGroupMask(info->sv[idx].sn) && swz > 0)
          return loadImm(NULL, 0u);
       if (info->sv[idx].sn == TGSI_SEMANTIC_SUBGROUP_SIZE)

@@ -40,6 +40,7 @@
 #include "util/u_math.h"
 #include "tgsi/tgsi_parse.h"
 #include "tgsi/tgsi_text.h"
+#include "tgsi/tgsi_dump.h"
 
 #include <clang/Basic/TargetInfo.h>
 
@@ -252,6 +253,7 @@ clover::llvm::build_tgsi_common( const Module &mod,
    if (!tgsi_text_translate(&code[0], prog, ARRAY_SIZE(prog))) {
       fail(r_log, build_error(),"Couldn't translate TGSI.");
    }
+   tgsi_dump(prog, TGSI_DUMP_FLOAT_AS_HEX);
 
    unsigned sz = tgsi_num_tokens(prog) * sizeof(struct tgsi_token);
    std::vector<char> data( (char *)prog, (char *)prog + sz );
