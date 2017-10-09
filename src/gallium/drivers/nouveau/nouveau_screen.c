@@ -290,6 +290,7 @@ static void
 nouveau_set_debug_callback(struct pipe_context *pipe,
                            const struct pipe_debug_callback *cb)
 {
+   printf("TODO: [queue] set_debug_callback\n");
    struct nouveau_context *context = nouveau_context(pipe);
 
    if (cb)

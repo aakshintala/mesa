@@ -33,6 +33,7 @@ nvc0_flush(struct pipe_context *pipe,
            struct pipe_fence_handle **fence,
            unsigned flags)
 {
+   printf("TODO: [queue] nvc0_flush\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_screen *screen = &nvc0->screen->base;
 
@@ -187,6 +188,7 @@ nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 static void
 nvc0_destroy(struct pipe_context *pipe)
 {
+   printf("TODO: [queue] nvc0_destroy\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
 
    if (nvc0->screen->cur_ctx == nvc0) {
@@ -346,6 +348,7 @@ nvc0_context_get_sample_position(struct pipe_context *, unsigned, unsigned,
 struct pipe_context *
 nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
 {
+   printf("TODO: [queue] nvc0_create\n");
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nvc0_context *nvc0;
    struct pipe_context *pipe;
