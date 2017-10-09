@@ -71,6 +71,7 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
+   printf("TODO: [event] nouveau_screen_fence_ref\n");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
 }
 
@@ -80,6 +81,7 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
+   printf("TODO: [event] nouveau_screen_fence_finish\n");
    if (!timeout)
       return nouveau_fence_signalled(nouveau_fence(pfence));
 
