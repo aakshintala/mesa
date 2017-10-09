@@ -423,6 +423,7 @@ nvc0_compute_upload_input(struct nvc0_context *nvc0,
 void
 nvc0_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
 {
+   printf("TODO: [kernel] nvc0_launch_grid\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_program *cp = nvc0->compprog;

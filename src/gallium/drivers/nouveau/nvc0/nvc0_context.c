@@ -56,6 +56,7 @@ nvc0_texture_barrier(struct pipe_context *pipe, unsigned flags)
 static void
 nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
 {
+   printf("TODO: [kernel] nvc0_memory_barrier\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    int i, s;

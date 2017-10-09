@@ -475,6 +475,7 @@ nvc0_bind_sampler_states(struct pipe_context *pipe,
                          enum pipe_shader_type shader,
                          unsigned start, unsigned nr, void **samplers)
 {
+   printf("TODO: [kernel] nvc0_bind_sampler_states\n");
    const unsigned s = nvc0_shader_stage(shader);
 
    assert(start == 0);
@@ -555,6 +556,7 @@ nvc0_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
                        unsigned start, unsigned nr,
                        struct pipe_sampler_view **views)
 {
+   printf("TODO: [kernel] nvc0_bind_sampler_views\n");
    const unsigned s = nvc0_shader_stage(shader);
 
    assert(start == 0);
@@ -597,6 +599,7 @@ nvc0_sp_state_create(struct pipe_context *pipe,
 static void
 nvc0_sp_state_delete(struct pipe_context *pipe, void *hwcso)
 {
+   printf("TODO: [kernel] nvc0_sp_state_delete\n");
    struct nvc0_program *prog = (struct nvc0_program *)hwcso;
 
    nvc0_program_destroy(nvc0_context(pipe), prog);
@@ -712,6 +715,7 @@ nvc0_cp_state_create(struct pipe_context *pipe,
 static void
 nvc0_cp_state_bind(struct pipe_context *pipe, void *hwcso)
 {
+    printf("TODO: [kernel] nvc0_cp_state_bind\n");
     struct nvc0_context *nvc0 = nvc0_context(pipe);
 
     nvc0->compprog = hwcso;
@@ -1107,6 +1111,7 @@ nvc0_set_compute_resources(struct pipe_context *pipe,
                            unsigned start, unsigned nr,
                            struct pipe_surface **resources)
 {
+   printf("TODO: [kernel] nvc0_set_compute_resources\n");
    nvc0_bind_surfaces_range(nvc0_context(pipe), 1, start, nr, resources);
 
    nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_SURFACES;
@@ -1306,6 +1311,7 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
                          struct pipe_resource **resources,
                          uint32_t **handles)
 {
+   printf("TODO: [kernel] nvc0_set_global_bindings\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct pipe_resource **ptr;
    unsigned i;
