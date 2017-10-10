@@ -110,6 +110,7 @@ nvc0_screen_is_format_supported(struct pipe_screen *pscreen,
 static int
 nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 {
+   printf("TODO: [resource] nvc0_screen_get_param\n");
    const uint16_t class_3d = nouveau_screen(pscreen)->class_3d;
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
 

@@ -201,6 +201,7 @@ nvc0_resource_copy_region(struct pipe_context *pipe,
                           struct pipe_resource *src, unsigned src_level,
                           const struct pipe_box *src_box)
 {
+   printf("TODO: [resource] nvc0_resource_copy_region\n");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    int ret;
    bool m2mf;

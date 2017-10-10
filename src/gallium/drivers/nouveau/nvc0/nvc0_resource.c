@@ -8,6 +8,7 @@ static struct pipe_resource *
 nvc0_resource_create(struct pipe_screen *screen,
                      const struct pipe_resource *templ)
 {
+   printf("TODO: [resource] nvc0_resource_create\n");
    switch (templ->target) {
    case PIPE_BUFFER:
       return nouveau_buffer_create(screen, templ);
@@ -38,6 +39,7 @@ nvc0_surface_create(struct pipe_context *pipe,
                     struct pipe_resource *pres,
                     const struct pipe_surface *templ)
 {
+   printf("TODO: [resource] nvc0_surface_create\n");
    if (unlikely(pres->target == PIPE_BUFFER))
       return nv50_surface_from_buffer(pipe, pres, templ);
    return nvc0_miptree_surface_new(pipe, pres, templ);

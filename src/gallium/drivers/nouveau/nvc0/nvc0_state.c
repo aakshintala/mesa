@@ -493,6 +493,7 @@ static void
 nvc0_sampler_view_destroy(struct pipe_context *pipe,
                           struct pipe_sampler_view *view)
 {
+   printf("TODO: [resource] nvc0_sampler_view_destroy\n");
    pipe_resource_reference(&view->texture, NULL);
 
    nvc0_screen_tic_free(nvc0_context(pipe)->screen, nv50_tic_entry(view));

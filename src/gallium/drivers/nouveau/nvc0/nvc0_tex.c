@@ -53,6 +53,7 @@ nvc0_create_sampler_view(struct pipe_context *pipe,
                          struct pipe_resource *res,
                          const struct pipe_sampler_view *templ)
 {
+   printf("TODO: [resource] nvc0_create_sampler_view\n");
    uint32_t flags = 0;
 
    if (templ->target == PIPE_TEXTURE_RECT || templ->target == PIPE_BUFFER)

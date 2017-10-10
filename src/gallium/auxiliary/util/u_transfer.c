@@ -9,6 +9,7 @@ void u_default_buffer_subdata(struct pipe_context *pipe,
                               unsigned usage, unsigned offset,
                               unsigned size, const void *data)
 {
+   printf("TODO: [resource] u_default_buffer_subdata\n");
    struct pipe_transfer *transfer = NULL;
    struct pipe_box box;
    uint8_t *map = NULL;
@@ -44,6 +45,7 @@ void u_default_texture_subdata(struct pipe_context *pipe,
                                unsigned stride,
                                unsigned layer_stride)
 {
+   printf("TODO: [resource] u_default_texture_subdata\n");
    struct pipe_transfer *transfer = NULL;
    const uint8_t *src_data = data;
    uint8_t *map = NULL;

@@ -77,6 +77,7 @@ nv50_surface_create(struct pipe_context *pipe,
 void
 nv50_surface_destroy(struct pipe_context *pipe, struct pipe_surface *ps)
 {
+   printf("TODO: [resource] nv50_surface_destroy\n");
    struct nv50_surface *s = nv50_surface(ps);
 
    pipe_resource_reference(&ps->texture, NULL);
