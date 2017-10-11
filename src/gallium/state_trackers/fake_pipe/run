@@ -1,0 +1,1 @@
+OCL_ICD_VENDORS=/etc/OpenCL/vendors/mesa.icd ./server.out

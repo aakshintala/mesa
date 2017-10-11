@@ -24,6 +24,7 @@
 #include "core/platform.hpp"
 #include "core/device.hpp"
 #include "git_sha1.h"
+#include "pipe/p_screen.h"
 
 using namespace clover;
 
@@ -99,6 +100,17 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
                 size_t size, void *r_buf, size_t *r_size) try {
    property_buffer buf { r_buf, size, r_size };
    auto &dev = obj(d_dev);
+
+   /* para-virt server starts */
+
+   if (size == 54321) {
+       std::cout << "Para-virt server starts\n";
+       std::cout << "Platform has " << dev.platform.devs.size()
+           << " devices" << std::endl;
+       while (1);
+   }
+
+   /* para-virt server ends */
 
    switch (param) {
    case CL_DEVICE_TYPE:

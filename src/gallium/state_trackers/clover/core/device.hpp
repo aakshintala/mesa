@@ -85,7 +85,7 @@ namespace clover {
 
       clover::platform &platform;
 
-   private:
+   public:
       pipe_screen *pipe;
       pipe_loader_device *ldev;
    };
