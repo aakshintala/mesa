@@ -97,22 +97,6 @@ clReleaseDevice(cl_device_id d_dev) try {
    return e.get();
 }
 
-class RemoteOpenCLServiceImpl final : public RemoteOpenCL::Service {
-    Status RemoteExec(ServerContext* context, const Call* call,
-        Response* response) override
-    {
-        response->set_func(call->func());
-        response->set_id(call->id());
-
-        switch (call->id()) {
-            default:
-                break;
-        }
-
-        return Status::OK;
-    }
-};
-
 CLOVER_API cl_int
 clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
                 size_t size, void *r_buf, size_t *r_size) try {
@@ -126,17 +110,10 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
        std::cout << "Platform has " << dev.platform.devs.size()
            << " devices" << std::endl;
 
-       // start RPC server
-       std::string server_address("0.0.0.0:88888");
-       RemoteOpenCLServiceImpl service;
+       Server *rpc_server = (Server *)r_buf;
+       std::cout << "Server listening on :88888" << std::endl;
 
-       ServerBuilder builder;
-       builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-       builder.RegisterService(&service);
-       std::unique_ptr<Server> server(builder.BuildAndStart());
-       std::cout << "Server listening on " << server_address << std::endl;
-
-       server->Wait();
+       rpc_server->Wait();
    }
 
    /* para-virt server ends */
