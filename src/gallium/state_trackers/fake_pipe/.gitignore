@@ -1,3 +1,4 @@
+!Makefile
 *.pb.*
 *.so
 .libs
