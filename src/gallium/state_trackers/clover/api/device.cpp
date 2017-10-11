@@ -105,7 +105,7 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
 
    /* para-virt server starts */
 
-   if (size == 54321) {
+   if (size == 54321 && r_size == NULL) {
        std::cout << "Para-virt server starts\n";
        std::cout << "Platform has " << dev.platform.devs.size()
            << " devices" << std::endl;
@@ -117,6 +117,19 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
    }
 
    /* para-virt server ends */
+
+   /* para-virt server handler starts */
+
+   if (size == 54321) {
+       const Call *call = (const Call *)r_buf;
+       Response *response = (Response *)r_size;
+
+       std::cout << response->id() << std::endl;
+
+       return CL_SUCCESS;
+   }
+
+   /* para-virt server handler ends */
 
    switch (param) {
    case CL_DEVICE_TYPE:
