@@ -50,7 +50,9 @@ CPP_SOURCES := \
 	util/lazy.hpp \
 	util/pointer.hpp \
 	util/range.hpp \
-	util/tuple.hpp
+	util/tuple.hpp \
+	../fake_pipe/include/api.grpc.pb.cc \
+	../fake_pipe/include/api.pb.cc
 
 LLVM_SOURCES := \
 	llvm/codegen/bitcode.cpp \

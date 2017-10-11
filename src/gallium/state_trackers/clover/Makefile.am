@@ -7,7 +7,13 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/src/gallium/include \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/auxiliary \
-	-I$(top_srcdir)/src/gallium/winsys
+	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe/include
+
+AM_LDFLAGS = `pkg-config --cflags protobuf grpc`
+AM_LDFLAGS += -L/usr/local/lib `pkg-config --libs protobuf grpc++ grpc` \
+           -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed \
+		   -ldl
 
 if HAVE_CLOVER_ICD
 AM_CPPFLAGS += -DHAVE_CLOVER_ICD
