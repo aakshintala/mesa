@@ -29,9 +29,6 @@ inline void chk_status(Status &status) {
 
 extern std::unique_ptr<RemoteOpenCL::Stub> _stub;
 
-extern cl_platform_id *_rpc_platforms;
-extern cl_uint *_rpc_num_platforms;
-extern cl_int _rpc_ret;
-
+void hello();
 
 #endif
