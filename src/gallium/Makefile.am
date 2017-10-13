@@ -173,6 +173,8 @@ if HAVE_ST_NINE
 SUBDIRS += state_trackers/nine targets/d3dadapter9
 endif
 
+SUBDIRS += state_trackers/fake_pipe
+
 ##
 ## Don't forget to bundle the remaining (non autotools) state-trackers/targets
 ##

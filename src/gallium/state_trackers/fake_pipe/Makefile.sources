@@ -1,0 +1,4 @@
+CPP_SOURCES := \
+	api.grpc.pb.cc \
+	api.pb.cc \
+	client.cpp

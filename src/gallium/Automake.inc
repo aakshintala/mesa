@@ -17,6 +17,7 @@ GALLIUM_DRIVER_CFLAGS = \
 	-I$(top_srcdir)/src/gallium/auxiliary \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe \
 	$(DEFINES) \
 	$(VISIBILITY_CFLAGS)
 
@@ -28,6 +29,7 @@ GALLIUM_DRIVER_CXXFLAGS = \
 	-I$(top_srcdir)/src/gallium/auxiliary \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe \
 	$(DEFINES) \
 	$(VISIBILITY_CXXFLAGS)
 
