@@ -1,8 +1,11 @@
 #include <iostream>
 
 #include "rpc.h"
+#include "wrap.h"
 
 //std::unique_ptr<RemoteOpenCL::Stub> _stub;
+
+extern "C" {
 
 void hello() {
     std::cout << "hellllo\n";
@@ -11,4 +14,6 @@ void hello() {
     //_stub = libocl::RemoteOpenCL::NewStub(channel);
 
     std::cout << "hiiiiii\n";
+}
+
 }

@@ -29,6 +29,4 @@ inline void chk_status(Status &status) {
 
 extern std::unique_ptr<RemoteOpenCL::Stub> _stub;
 
-void hello();
-
 #endif

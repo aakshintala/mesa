@@ -47,8 +47,9 @@ proto: api.proto
 #	(cd include; \
 #		g++ -std=c++11 -fPIC api.grpc.pb.cc api.pb.cc -shared -o librpcapi.so \
 #		-Wl,--whole-archive -Wl,--no-whole-archive)
-		g++ -std=c++11 -c api.grpc.pb.cc api.pb.cc
-		ar rvs librpcapi.a api.grpc.pb.o api.pb.o
+
+#		g++ -std=c++11 -c api.grpc.pb.cc api.pb.cc
+#		ar rvs librpcapi.a api.grpc.pb.o api.pb.o
 
 clean:
 	 rm -rf *.pb.* *.so *.a *.out
