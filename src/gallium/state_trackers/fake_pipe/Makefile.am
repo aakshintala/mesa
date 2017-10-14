@@ -1,16 +1,20 @@
 include Makefile.sources
 
-AM_CPPFLAGS = \
+XMLRPC_C_CONFIG = /usr/local/bin/xmlrpc-c-config
+
+AM_CFLAGS = \
 	-I$(top_srcdir)/include \
 	-I$(top_builddir)/src \
 	-I$(top_srcdir)/src \
 	-I$(top_srcdir)/src/gallium/include \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/auxiliary \
-	-I$(top_srcdir)/src/gallium/winsys
+	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe \
+	$(shell $(XMLRPC_C_CONFIG) client abyss-server --cflags)
 
 if HAVE_CLOVER_ICD
-AM_CPPFLAGS += -DHAVE_CLOVER_ICD
+AM_CFLAGS += -DHAVE_CLOVER_ICD
 else
 # Only install the headers if we are building a stand-alone implementation
 cldir = $(includedir)/CL
@@ -29,13 +33,5 @@ cl_HEADERS = \
 endif
 
 noinst_LTLIBRARIES = librpcclient.la
-
-librpcclient_la_CXXFLAGS = \
-	-std=c++11 \
-	$(VISIBILITY_CXXFLAGS) \
-	`pkg-config --cflags protobuf grpc` \
-	-L/usr/local/lib `pkg-config --libs protobuf grpc++ grpc` \
-	-Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed \
-	-ldl
 
 librpcclient_la_SOURCES = $(CPP_SOURCES)

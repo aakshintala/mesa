@@ -25,19 +25,7 @@
 #include "core/device.hpp"
 #include "git_sha1.h"
 
-#include "rpc.h"
-
-std::unique_ptr<RemoteOpenCL::Stub> _stub;
-
 using namespace clover;
-
-__attribute__((constructor)) void init_rpc_service(void)
-{
-    auto channel = grpc::CreateChannel(
-            "192.168.122.249:88888", grpc::InsecureChannelCredentials());
-    _stub = libocl::RemoteOpenCL::NewStub(channel);
-    std:: cout << "Channel established." << std::endl;
-}
 
 CLOVER_API cl_int
 clGetDeviceIDs(cl_platform_id d_platform, cl_device_type device_type,
@@ -45,11 +33,6 @@ clGetDeviceIDs(cl_platform_id d_platform, cl_device_type device_type,
                cl_uint *rnum_devices) try {
    auto &platform = obj(d_platform);
    std::vector<cl_device_id> d_devs;
-
-   Call call;
-   call.set_id(111111);
-   send_rpc_blocking(response);
-   std::cout << "helllllllo\n";
 
    if ((!num_entries && rd_devices) ||
        (!rnum_devices && !rd_devices))

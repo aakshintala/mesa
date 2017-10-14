@@ -52,7 +52,8 @@ GALLIUM_COMMON_LIB_DEPS = \
 	$(LIBSENSORS_LIBS) \
 	$(CLOCK_LIB) \
 	$(PTHREAD_LIBS) \
-	$(DLOPEN_LIBS)
+	$(DLOPEN_LIBS) \
+	-L/usr/local/lib -lxmlrpc_client -lxmlrpc  -lxmlrpc_xmlparse -lxmlrpc_xmltok -lxmlrpc_util -lpthread -L/usr/lib/x86_64-linux-gnu -lcurl
 
 if HAVE_LIBDRM
 GALLIUM_COMMON_LIB_DEPS += \
