@@ -19,18 +19,13 @@ PROTOC = protoc
 GRPC_CPP_PLUGIN = grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
-.PHONY: server proto
+.PHONY: server client proto
 
-client: proto
-	g++ -std=c++11 -c client.cpp \
-		-I. $(LDFLAGS)
-	ar rvs librpcclient.a client.o
-
-#		-Wl,-rpath,include -Linclude -lrpcapi \
-#		-fPIC -shared \
-#		-Wl,--whole-archive -Wl,--no-whole-archive \
-#		-lOpenCL \
-#		-o librpcclient.so
+client:
+	g++ -std=c++11 api.grpc.pb.cc api.pb.cc \
+		-I. $(LDFLAGS) \
+		-fPIC -shared \
+		-o librpcapi.so
 
 server: proto
 	OCL_ICD_VENDORS=/etc/OpenCL/vendors/mesa.icd \
