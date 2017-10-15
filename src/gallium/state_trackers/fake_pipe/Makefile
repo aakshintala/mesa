@@ -19,7 +19,27 @@ PROTOC = protoc
 GRPC_CPP_PLUGIN = grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
-.PHONY: server proto
+XMLRPC_C_CONFIG = /usr/local/bin/xmlrpc-c-config
+
+INCLUDES = -I. $(shell $(XMLRPC_C_CONFIG) client abyss-server --cflags)
+
+LIBS_CLIENT = \
+  $(shell $(XMLRPC_C_CONFIG) client --libs)
+
+LIBS_SERVER_ABYSS = \
+  $(shell $(XMLRPC_C_CONFIG) abyss-server --libs)
+
+LIBS_SERVER_CGI = \
+  $(shell $(XMLRPC_C_CONFIG) cgi-server --libs)
+
+LIBS_BASE = \
+  $(shell $(XMLRPC_C_CONFIG) --libs)
+
+.PHONY: new-server server proto
+
+new-server: server.c
+	gcc server.c -o server.out \
+		$(INCLUDES) $(LIBS_SERVER_ABYSS) $(LIBS_SERVER_CGI) $(LIBS_BASE)
 
 server: proto
 	OCL_ICD_VENDORS=/etc/OpenCL/vendors/mesa.icd \
