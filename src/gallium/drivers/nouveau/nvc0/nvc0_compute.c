@@ -30,6 +30,7 @@ int
 nvc0_screen_compute_setup(struct nvc0_screen *screen,
                           struct nouveau_pushbuf *push)
 {
+   printf("TODO: [nvc0_compute] nvc0_screen_compute_setup\n");
    struct nouveau_object *chan = screen->base.channel;
    struct nouveau_device *dev = screen->base.device;
    uint32_t obj_class;
@@ -143,6 +144,7 @@ nvc0_screen_compute_setup(struct nvc0_screen *screen,
 static void
 nvc0_compute_validate_samplers(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_samplers\n");
    bool need_flush = nvc0_validate_tsc(nvc0, 5);
    if (need_flush) {
       BEGIN_NVC0(nvc0->base.pushbuf, NVC0_CP(TSC_FLUSH), 1);
@@ -158,6 +160,7 @@ nvc0_compute_validate_samplers(struct nvc0_context *nvc0)
 static void
 nvc0_compute_validate_textures(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_textures\n");
    bool need_flush = nvc0_validate_tic(nvc0, 5);
    if (need_flush) {
       BEGIN_NVC0(nvc0->base.pushbuf, NVC0_CP(TIC_FLUSH), 1);
@@ -176,6 +179,7 @@ nvc0_compute_validate_textures(struct nvc0_context *nvc0)
 static inline void
 nvc0_compute_invalidate_constbufs(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_invalidate_constbufs\n");
    int s;
 
    /* Invalidate all 3D constbufs because they are aliased with COMPUTE. */
@@ -189,6 +193,7 @@ nvc0_compute_invalidate_constbufs(struct nvc0_context *nvc0)
 static void
 nvc0_compute_validate_constbufs(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_constbufs\n");
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    const int s = 5;
 
@@ -249,6 +254,7 @@ nvc0_compute_validate_constbufs(struct nvc0_context *nvc0)
 static void
 nvc0_compute_validate_driverconst(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_driverconst\n");
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_screen *screen = nvc0->screen;
 
@@ -265,6 +271,7 @@ nvc0_compute_validate_driverconst(struct nvc0_context *nvc0)
 static void
 nvc0_compute_validate_buffers(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_buffers\n");
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_screen *screen = nvc0->screen;
    const int s = 5;
@@ -302,6 +309,7 @@ nvc0_compute_validate_buffers(struct nvc0_context *nvc0)
 void
 nvc0_compute_validate_globals(struct nvc0_context *nvc0)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_globals\n");
    unsigned i;
 
    for (i = 0; i < nvc0->global_residents.size / sizeof(struct pipe_resource *);
@@ -317,6 +325,7 @@ nvc0_compute_validate_globals(struct nvc0_context *nvc0)
 static inline void
 nvc0_compute_invalidate_surfaces(struct nvc0_context *nvc0, const int s)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_invalidate_surfaces\n");
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    int i;
 

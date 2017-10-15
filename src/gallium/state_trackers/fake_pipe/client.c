@@ -7,13 +7,16 @@
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/client.h>
 
-//#include "rpc.h"
 #include "wrap.h"
 
 #define SLEEP(seconds) sleep(seconds);
 
 #define NAME "Xmlrpc-c Test Client"
 #define VERSION "1.0"
+
+static xmlrpc_env env;
+const char * const serverUrl = "http://localhost:8888/RPC2";
+const char * const methodName = "sample.add";
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -24,7 +27,96 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
     }
 }
 
-void hello(void) {
+void rpc_sync(void)
+{
+    const char * const methodName = "rpc_sync";
+    init_rpc_service();
+
+    xmlrpc_value * resultP;
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(i)", 0);
+    dieIfFaultOccurred(&env);
+
+    xmlrpc_int32 ret;
+    xmlrpc_read_int(&env, resultP, &ret);
+    dieIfFaultOccurred(&env);
+    if (ret != 0)
+        printf("oops, something went wrong..\n");
+
+    xmlrpc_DECREF(resultP);
+}
+
+void rpc_nvc0_create(void *priv, unsigned ctxflags)
+{
+    const char * const methodName = "nvc0_create";
+    init_rpc_service();
+
+    xmlrpc_value * resultP;
+    char *private = priv;
+    if (private == NULL)
+        private = "";
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(si)",
+        private, (xmlrpc_int32)ctxflags);
+    dieIfFaultOccurred(&env);
+
+    xmlrpc_int32 ret;
+    xmlrpc_read_int(&env, resultP, &ret);
+    dieIfFaultOccurred(&env);
+    if (ret != 0)
+        printf("oops, something went wrong..\n");
+
+    xmlrpc_DECREF(resultP);
+}
+
+void rpc_nvc0_screen_get_param(int param)
+{
+    const char * const methodName = "nvc0_screen_get_param";
+    init_rpc_service();
+
+    xmlrpc_value * resultP;
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(i)",
+        (xmlrpc_int32)param);
+    dieIfFaultOccurred(&env);
+
+    xmlrpc_int32 ret;
+    xmlrpc_read_int(&env, resultP, &ret);
+    dieIfFaultOccurred(&env);
+    if (ret != 0)
+        printf("oops, something went wrong..\n");
+
+    xmlrpc_DECREF(resultP);
+}
+void hello(void)
+{
+    init_rpc_service();
+
+    printf("Making XMLRPC call to server url '%s' method '%s' "
+           "to request the sum "
+           "of 5 and 7...\n", serverUrl, methodName);
+
+    /* Make the remote procedure call */
+    xmlrpc_value * resultP;
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName,
+                                 "(ii)", (xmlrpc_int32) 5, (xmlrpc_int32) 7);
+    dieIfFaultOccurred(&env);
+
+    /* Get our sum and print it out. */
+    xmlrpc_int32 sum;
+
+    xmlrpc_read_int(&env, resultP, &sum);
+    dieIfFaultOccurred(&env);
+    printf("The sum is %d\n", sum);
+
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName,
+                                 "(ii)", (xmlrpc_int32) 3, (xmlrpc_int32) 7);
+    xmlrpc_read_int(&env, resultP, &sum);
+    printf("The sum is %d\n", sum);
+
+    /* Dispose of our result value. */
+    xmlrpc_DECREF(resultP);
+}
+
+void init_rpc_service(void)
+{
     static int initialized = 0;
 
     if (initialized)
@@ -32,39 +124,18 @@ void hello(void) {
     else
         initialized = 1;
 
-    xmlrpc_env env;
-    xmlrpc_value * resultP;
-    xmlrpc_int32 sum;
-    const char * const serverUrl = "http://localhost:8888/RPC2";
-    const char * const methodName = "sample.add";
-
     /* Initialize our error-handling environment. */
     xmlrpc_env_init(&env);
 
     /* Create the global XML-RPC client object. */
     xmlrpc_client_init2(&env, XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION, NULL, 0);
     dieIfFaultOccurred(&env);
+}
 
-    printf("Making XMLRPC call to server url '%s' method '%s' "
-           "to request the sum "
-           "of 5 and 7...\n", serverUrl, methodName);
-
-    /* Make the remote procedure call */
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName,
-                                 "(ii)", (xmlrpc_int32) 5, (xmlrpc_int32) 7);
-    dieIfFaultOccurred(&env);
-    
-    /* Get our sum and print it out. */
-    xmlrpc_read_int(&env, resultP, &sum);
-    dieIfFaultOccurred(&env);
-    printf("The sum is %d\n", sum);
-    
-    /* Dispose of our result value. */
-    xmlrpc_DECREF(resultP);
-
-    /* Clean up our error-handling environment. */
+/*
+__attribute__((destructor)) void cleanup(void)
+{
     xmlrpc_env_clean(&env);
-    
-    /* Shutdown our XML-RPC client library. */
     xmlrpc_client_cleanup();
 }
+*/
