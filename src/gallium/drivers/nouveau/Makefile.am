@@ -26,7 +26,8 @@ include $(top_srcdir)/src/gallium/Automake.inc
 AM_CPPFLAGS = \
 	$(GALLIUM_DRIVER_CFLAGS) \
 	$(LIBDRM_CFLAGS) \
-	$(NOUVEAU_CFLAGS)
+	$(NOUVEAU_CFLAGS) \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe
 
 noinst_LTLIBRARIES = libnouveau.la
 

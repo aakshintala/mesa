@@ -100,9 +100,11 @@ pipe_nouveau_la_LIBADD = \
 	$(top_builddir)/src/gallium/winsys/nouveau/drm/libnouveaudrm.la \
 	$(top_builddir)/src/gallium/drivers/nouveau/libnouveau.la \
 	$(LIBDRM_LIBS) \
+	$(top_builddir)/src/gallium/state_trackers/fake_pipe/librpcclient.la \
 	$(NOUVEAU_LIBS)
 
 endif
+
 
 if HAVE_GALLIUM_R300
 pipe_LTLIBRARIES += pipe_r300.la

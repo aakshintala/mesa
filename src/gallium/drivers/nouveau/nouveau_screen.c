@@ -26,11 +26,14 @@
 /* XXX this should go away */
 #include "state_tracker/drm_driver.h"
 
+#include "wrap.h"
+
 int nouveau_mesa_debug = 0;
 
 static const char *
 nouveau_screen_get_name(struct pipe_screen *pscreen)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_get_name\n");
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
    static char buffer[128];
 
@@ -41,18 +44,21 @@ nouveau_screen_get_name(struct pipe_screen *pscreen)
 static const char *
 nouveau_screen_get_vendor(struct pipe_screen *pscreen)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_get_vendor\n");
    return "nouveau";
 }
 
 static const char *
 nouveau_screen_get_device_vendor(struct pipe_screen *pscreen)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_get_device_vendor\n");
    return "NVIDIA";
 }
 
 static uint64_t
 nouveau_screen_get_timestamp(struct pipe_screen *pscreen)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_get_timestamp\n");
    int64_t cpu_time = os_time_get() * 1000;
 
    /* getparam of PTIMER_TIME takes about x10 as long (several usecs) */
@@ -63,6 +69,7 @@ nouveau_screen_get_timestamp(struct pipe_screen *pscreen)
 static struct disk_cache *
 nouveau_screen_get_disk_shader_cache(struct pipe_screen *pscreen)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_get_disk_shader_cache\n");
    return nouveau_screen(pscreen)->disk_shader_cache;
 }
 
@@ -71,7 +78,7 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
-   printf("TODO: [event] nouveau_screen_fence_ref\n");
+   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_ref\n");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
 }
 
@@ -81,7 +88,7 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("TODO: [event] nouveau_screen_fence_finish\n");
+   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_finish\n");
    if (!timeout)
       return nouveau_fence_signalled(nouveau_fence(pfence));
 
@@ -94,6 +101,7 @@ nouveau_screen_bo_from_handle(struct pipe_screen *pscreen,
                               struct winsys_handle *whandle,
                               unsigned *out_stride)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_bo_from_handle\n");
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
    struct nouveau_bo *bo = 0;
    int ret;
@@ -133,6 +141,7 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
                              unsigned stride,
                              struct winsys_handle *whandle)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_bo_get_handle\n");
    whandle->stride = stride;
 
    if (whandle->type == DRM_API_HANDLE_TYPE_SHARED) {
@@ -150,6 +159,7 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
 static void
 nouveau_disk_cache_create(struct nouveau_screen *screen)
 {
+   printf("TODO: [nouveau_screen] nouveau_disk_cache_create\n");
    uint32_t mesa_timestamp;
    char *timestamp_str;
    int res;
@@ -169,6 +179,8 @@ nouveau_disk_cache_create(struct nouveau_screen *screen)
 int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
+   printf("TODO: [nouveau_screen] nouveau_screen_ini\n");
+   hello();
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };
    struct nvc0_fifo nvc0_data = { };
@@ -271,6 +283,9 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
+   printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
+   rpc_sync();
+
    int fd = screen->drm->fd;
 
    nouveau_mm_destroy(screen->mm_GART);
@@ -292,7 +307,7 @@ static void
 nouveau_set_debug_callback(struct pipe_context *pipe,
                            const struct pipe_debug_callback *cb)
 {
-   printf("TODO: [queue] set_debug_callback\n");
+   printf("TODO: [nouveau_screen] nouveau_set_debug_callback\n");
    struct nouveau_context *context = nouveau_context(pipe);
 
    if (cb)
@@ -304,5 +319,6 @@ nouveau_set_debug_callback(struct pipe_context *pipe,
 void
 nouveau_context_init(struct nouveau_context *context)
 {
+   printf("NRPC: [nouveau_screen] nouveau_context_init (called by nvc0_create)\n");
    context->pipe.set_debug_callback = nouveau_set_debug_callback;
 }

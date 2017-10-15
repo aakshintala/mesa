@@ -17,6 +17,7 @@ GALLIUM_DRIVER_CFLAGS = \
 	-I$(top_srcdir)/src/gallium/auxiliary \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe \
 	$(DEFINES) \
 	$(VISIBILITY_CFLAGS)
 
@@ -28,6 +29,7 @@ GALLIUM_DRIVER_CXXFLAGS = \
 	-I$(top_srcdir)/src/gallium/auxiliary \
 	-I$(top_srcdir)/src/gallium/drivers \
 	-I$(top_srcdir)/src/gallium/winsys \
+	-I$(top_srcdir)/src/gallium/state_trackers/fake_pipe \
 	$(DEFINES) \
 	$(VISIBILITY_CXXFLAGS)
 
@@ -50,7 +52,8 @@ GALLIUM_COMMON_LIB_DEPS = \
 	$(LIBSENSORS_LIBS) \
 	$(CLOCK_LIB) \
 	$(PTHREAD_LIBS) \
-	$(DLOPEN_LIBS)
+	$(DLOPEN_LIBS) \
+	-L/usr/local/lib -lxmlrpc_client -lxmlrpc  -lxmlrpc_xmlparse -lxmlrpc_xmltok -lxmlrpc_util -lpthread -L/usr/lib/x86_64-linux-gnu -lcurl
 
 if HAVE_LIBDRM
 GALLIUM_COMMON_LIB_DEPS += \

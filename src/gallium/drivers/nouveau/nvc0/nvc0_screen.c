@@ -37,6 +37,8 @@
 
 #include "nv50/g80_texture.xml.h"
 
+#include "wrap.h"
+
 static boolean
 nvc0_screen_is_format_supported(struct pipe_screen *pscreen,
                                 enum pipe_format format,
@@ -110,7 +112,10 @@ nvc0_screen_is_format_supported(struct pipe_screen *pscreen,
 static int
 nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 {
-   printf("TODO: [resource] nvc0_screen_get_param\n");
+   printf("RPC: [nvc0_screen/resource] nvc0_screen_get_param\n");
+   rpc_sync();
+   //rpc_nvc0_screen_get_param(param);
+
    const uint16_t class_3d = nouveau_screen(pscreen)->class_3d;
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
 

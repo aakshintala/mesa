@@ -37,6 +37,7 @@ int main()
     std::unique_ptr<Server> rpc_server(builder.BuildAndStart());
 
     cl_platform_id platform;
+
     cl_int ret;
     ret = clGetPlatformIDs(1, &platform, NULL);
     ret = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, NULL);

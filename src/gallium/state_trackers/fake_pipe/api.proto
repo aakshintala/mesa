@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package libocl;
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+option objc_class_prefix = "HLW";
+
+service RemoteOpenCL {
+  rpc RemoteExec (Call) returns (Response);
+}
+
+// The forwarded API calls
+message Call {
+  string func = 1;  // required
+  uint32 id   = 2;  // required
+
+  /* clGetPlatformXX and clGetDeviceXX */
+  uint32 num_entries          = 3;
+  bool num_platforms_t        = 4;
+  bool platforms_t            = 5;
+  uint64 platform_id          = 6;
+  uint32 param_name           = 7;
+  uint32 param_value_size     = 8;
+  bool param_value_size_ret_t = 9;
+  uint32 device_type          = 10;
+  bool num_devices_t          = 11;
+  bool devices_t              = 12;
+  uint64 device_id            = 13;
+
+  /* clXXContextYY */
+  uint32 num_devices          = 14;
+  bytes devices               = 15;
+  bytes properties            = 16;
+  bytes context               = 17;
+
+  /* clXXBufferYY */
+  uint32 flags                = 18;
+  uint64 mem_size             = 19;
+  bytes mem_data              = 20;
+  bytes command_queue         = 21;
+  bytes buffer                = 22;
+  uint32 map_id               = 39;
+  uint64 mem_offset           = 23;
+  bool blocking               = 24;
+
+  /* clXXProgramYY */
+  uint32 code_num             = 25;
+  repeated string codes       = 26;
+  repeated uint64 code_lens   = 27;
+  bytes program               = 28;
+
+  /* clXXKernelYY */
+  string options              = 29;
+  string kernel_name          = 30;
+  bytes kernel                = 31;
+  uint32 arg_index            = 32;
+  uint64 arg_size             = 33;
+  bytes arg_value             = 34;
+  uint32 work_dim             = 35;
+  bytes global_work_offset    = 36;
+  bytes global_work_size      = 37;
+  bytes local_work_size       = 38;
+}
+
+// The response message
+message Response {
+  string func                = 1;  // required
+  uint32 id                  = 2;  // required
+  PlatformInfo platform_info = 3;
+  DeviceInfo device_info     = 4;
+  int32 errcode              = 5;
+
+  message PlatformInfo {
+      uint32 num_platforms        = 1;
+      repeated uint64 platforms   = 2;
+      bytes param_value           = 3;
+      uint32 param_value_size_ret = 4;
+  }
+
+  message DeviceInfo {
+      uint32 num_devices          = 1;
+      repeated uint64 devices     = 2;
+      bytes param_value           = 3;
+      uint32 param_value_size_ret = 4;
+  }
+
+  bytes context                   = 6;
+  bytes command_queue             = 7;
+  bytes buffer                    = 8; // cl_mem buffer
+  bytes data                      = 9;
+  bytes program                   = 10;
+  bytes kernel                    = 11;
+
+  ProgramInfo program_info        = 12;
+
+  // also work as KernelWorkGroupInfo and ContextInfo
+  message ProgramInfo {
+      bytes param_value           = 1;
+      uint32 param_value_size_ret = 2;
+  }
+
+  uint32 map_id                   = 13; // index of mapped ptr
+}

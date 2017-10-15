@@ -28,6 +28,8 @@
 #include "nvc0/nvc0_screen.h"
 #include "nvc0/nvc0_resource.h"
 
+#include "wrap.h"
+
 static void
 nvc0_flush(struct pipe_context *pipe,
            struct pipe_fence_handle **fence,
@@ -57,7 +59,9 @@ nvc0_texture_barrier(struct pipe_context *pipe, unsigned flags)
 static void
 nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
 {
-   printf("TODO: [kernel] nvc0_memory_barrier\n");
+   printf("RPC: [nvc0_context/kernel] nvc0_memory_barrier\n");
+   rpc_sync();
+
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    int i, s;
@@ -348,7 +352,10 @@ nvc0_context_get_sample_position(struct pipe_context *, unsigned, unsigned,
 struct pipe_context *
 nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
 {
-   printf("TODO: [queue] nvc0_create\n");
+   printf("RPC: [nvc0_context/queue] nvc0_create\n");
+   //rpc_nvc0_create(priv, ctxflags);
+   rpc_sync();
+
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nvc0_context *nvc0;
    struct pipe_context *pipe;
