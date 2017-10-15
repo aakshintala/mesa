@@ -6,14 +6,10 @@ extern "C" {
 #endif
 
 void init_rpc_service(void);
-//__attribute__((destructor)) void cleanup(void);
 
 /* handlers */
-void rpc_nvc0_create(void *priv, unsigned ctxflags);
-void rpc_nvc0_screen_get_param(int param);
-void rpc_sync(void);
-
-void hello(void);
+void rpc_sync_start(void);
+void rpc_sync_end(void);
 
 #ifdef __cplusplus
 }

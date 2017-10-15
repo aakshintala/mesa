@@ -19,51 +19,47 @@
             return NULL; \
     } while (0)
 
-static xmlrpc_value *
-sample_add(xmlrpc_env *   const envP,
-           xmlrpc_value * const paramArrayP,
-           void *         const serverInfo,
-           void *         const channelInfo) {
+pthread_mutex_t client_lock;
+pthread_mutex_t server_lock;
 
-    xmlrpc_int32 x, y, z;
-
-    /* Parse our argument array. */
-    xmlrpc_decompose_value(envP, paramArrayP, "(ii)", &x, &y);
-    if (envP->fault_occurred)
-        return NULL;
-
-    /* Add our two numbers. */
-    z = x + y;
-
-    /* Sometimes, make it look hard (so client can see what it's like
-       to do an RPC that takes a while).
-    */
-    if (y == 1)
-        SLEEP(5);
-
-    /* Return our result. */
-    return xmlrpc_build_value(envP, "i", z);
-}
-
-static xmlrpc_value* rpc_nvc0_create(xmlrpc_env* const envP,
+static xmlrpc_value* rpc_client_sync(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
-    void *priv;
-    unsigned ctxflags;
-    xmlrpc_decompose_value(envP, paramArrayP, "(si)", &priv, (xmlrpc_int32 *)&ctxflags);
+    pthread_mutex_unlock(&server_lock); // server continues pipe execution
+    pthread_mutex_lock(&client_lock);   // client wait for server
+
+    char *name;
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
     RETURN_IF_FAULT(envP);
-    printf("%d %s\n", ctxflags, (char *)priv);
+    printf("%s\n", name);
+
+    pthread_mutex_unlock(&client_lock); // client continues execution
+    return xmlrpc_build_value(envP, "i", 0);
+}
+
+static xmlrpc_value* rpc_server_sync_start(xmlrpc_env* const envP,
+    xmlrpc_value* const paramArrayP, void* const user_data)
+{
+    pthread_mutex_lock(&client_lock); // client wait for server
+    pthread_mutex_lock(&server_lock); // block server pipe execution
+
+    char *name;
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
+    RETURN_IF_FAULT(envP);
+    printf("%s\n", name);
 
     return xmlrpc_build_value(envP, "i", 0);
 }
 
-static xmlrpc_value* rpc_nvc0_screen_get_param(xmlrpc_env* const envP,
+static xmlrpc_value* rpc_server_sync_end(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
-    int param;
-    xmlrpc_decompose_value(envP, paramArrayP, "(i)", (xmlrpc_int32 *)&param);
+    pthread_mutex_unlock(&client_lock); // client wait for server
+
+    char *name;
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
     RETURN_IF_FAULT(envP);
-    printf("%d\n", param);
+    printf("%s\n", name);
 
     return xmlrpc_build_value(envP, "i", 0);
 }
@@ -92,30 +88,27 @@ main(int           const argc,
         exit(1);
     }
 
-    /* register simple.add */
-    struct xmlrpc_method_info3 const simpleAddMethodInfo = {
-        /* .methodName     = */ "sample.add",
-        /* .methodFunction = */ &sample_add,
-    };
-    xmlrpc_registry_add_method3(&env, registryP, &simpleAddMethodInfo);
-    if (env.fault_occurred) {
-        printf("xmlrpc_registry_add_method3() failed.  %s\n",
-               env.fault_string);
-        exit(1);
-    }
-
-    /* register nvc0_create */
-	xmlrpc_registry_add_method(&env, registryP, NULL, "nvc0_create",
-			&rpc_nvc0_create, NULL);
+    /* register client_sync */
+	xmlrpc_registry_add_method(&env, registryP, NULL, "rpc_client_sync",
+			&rpc_client_sync, NULL);
     if (env.fault_occurred) {
         printf("xmlrpc_registry_add_method() failed.  %s\n",
                env.fault_string);
         exit(1);
     }
 
-    /* register nvc0_screen_get_param */
-	xmlrpc_registry_add_method(&env, registryP, NULL, "nvc0_screen_get_param",
-			&rpc_nvc0_screen_get_param, NULL);
+    /* register server_sync_start  */
+	xmlrpc_registry_add_method(&env, registryP, NULL, "rpc_server_sync_start",
+			&rpc_server_sync_start, NULL);
+    if (env.fault_occurred) {
+        printf("xmlrpc_registry_add_method() failed.  %s\n",
+               env.fault_string);
+        exit(1);
+    }
+
+    /* register server_sync_end */
+	xmlrpc_registry_add_method(&env, registryP, NULL, "rpc_server_sync_end",
+			&rpc_server_sync_end, NULL);
     if (env.fault_occurred) {
         printf("xmlrpc_registry_add_method() failed.  %s\n",
                env.fault_string);
@@ -126,6 +119,16 @@ main(int           const argc,
     serverparm.registryP        = registryP;
     serverparm.port_number      = atoi(argv[1]);
     serverparm.log_file_name    = "/tmp/xmlrpc_log";
+
+    if (pthread_mutex_init(&client_lock, NULL) != 0) {
+        printf("\n client mutex init failed\n");
+        return 1;
+    }
+    if (pthread_mutex_init(&server_lock, NULL) != 0) {
+        printf("\n server mutex init failed\n");
+        return 1;
+    }
+    pthread_mutex_lock(&server_lock);
 
     printf("Running XML-RPC server...\n");
 
