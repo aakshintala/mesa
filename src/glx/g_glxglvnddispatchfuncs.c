@@ -342,7 +342,11 @@ static const char *dispatch_GetDriverConfig(const char *driverName)
      * The options are constant for a given driverName, so we do not need
      * a context (and apps expect to be able to call this without one).
      */
+#if defined(GLX_DIRECT_RENDERING) && !defined(GLX_USE_APPLEGL)
     return glXGetDriverConfig(driverName);
+#else
+    return NULL;
+#endif
 }
 
 
