@@ -478,7 +478,7 @@ nvc0_bind_sampler_states(struct pipe_context *pipe,
                          unsigned start, unsigned nr, void **samplers)
 {
    printf("RPC: [kernel] nvc0_bind_sampler_states\n");
-   rpc_sync();
+   rpc_sync_start();
 
    const unsigned s = nvc0_shader_stage(shader);
 
@@ -489,6 +489,7 @@ nvc0_bind_sampler_states(struct pipe_context *pipe,
       nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_SAMPLERS;
    else
       nvc0_context(pipe)->dirty_3d |= NVC0_NEW_3D_SAMPLERS;
+   rpc_sync_end();
 }
 
 
@@ -562,7 +563,7 @@ nvc0_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
                        struct pipe_sampler_view **views)
 {
    printf("RPC: [kernel] nvc0_bind_sampler_views\n");
-   rpc_sync();
+   rpc_sync_start();
 
    const unsigned s = nvc0_shader_stage(shader);
 
@@ -573,6 +574,7 @@ nvc0_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
       nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_TEXTURES;
    else
       nvc0_context(pipe)->dirty_3d |= NVC0_NEW_3D_TEXTURES;
+   rpc_sync_end();
 }
 
 /* ============================= SHADERS =======================================
@@ -723,12 +725,14 @@ static void
 nvc0_cp_state_bind(struct pipe_context *pipe, void *hwcso)
 {
     printf("RPC: [kernel] nvc0_cp_state_bind\n");
-    rpc_sync();
+    rpc_sync_start();
 
     struct nvc0_context *nvc0 = nvc0_context(pipe);
 
     nvc0->compprog = hwcso;
     nvc0->dirty_cp |= NVC0_NEW_CP_PROGRAM;
+
+   rpc_sync_end();
 }
 
 static void
@@ -737,7 +741,7 @@ nvc0_set_constant_buffer(struct pipe_context *pipe,
                          const struct pipe_constant_buffer *cb)
 {
    printf("RPC: [nvc0_state] nvc0_set_constant_buffer\n");
-   rpc_sync();
+   rpc_sync_start();
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct pipe_resource *res = cb ? cb->buffer : NULL;
@@ -787,6 +791,8 @@ nvc0_set_constant_buffer(struct pipe_context *pipe,
       nvc0->constbuf_valid[s] &= ~(1 << i);
       nvc0->constbuf_coherent[s] &= ~(1 << i);
    }
+
+   rpc_sync_end();
 }
 
 /* =============================================================================
@@ -1127,11 +1133,13 @@ nvc0_set_compute_resources(struct pipe_context *pipe,
                            struct pipe_surface **resources)
 {
    printf("RPC: [nvc0_state/kernel] nvc0_set_compute_resources\n");
-   rpc_sync();
+   rpc_sync_start();
 
    nvc0_bind_surfaces_range(nvc0_context(pipe), 1, start, nr, resources);
 
    nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_SURFACES;
+
+   rpc_sync_end();
 }
 
 static bool
@@ -1329,7 +1337,7 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
                          uint32_t **handles)
 {
    printf("RPC: [kernel] nvc0_set_global_bindings\n");
-   rpc_sync();
+   rpc_sync_start();
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct pipe_resource **ptr;
@@ -1361,6 +1369,8 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
    nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_GLOBAL);
 
    nvc0->dirty_cp |= NVC0_NEW_CP_GLOBALS;
+
+   rpc_sync_end();
 }
 
 void

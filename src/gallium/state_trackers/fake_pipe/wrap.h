@@ -8,8 +8,8 @@ extern "C" {
 void init_rpc_service(void);
 
 /* handlers */
-void rpc_sync_start(void);
-void rpc_sync_end(void);
+void rpc_sync_start(const char *);
+void rpc_sync_end(const char *);
 
 #ifdef __cplusplus
 }

@@ -180,7 +180,7 @@ int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
    printf("TODO: [nouveau_screen] nouveau_screen_ini\n");
-   hello();
+
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };
    struct nvc0_fifo nvc0_data = { };
@@ -284,7 +284,7 @@ void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
    printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
-   rpc_sync();
+   rpc_sync_start();
 
    int fd = screen->drm->fd;
 
@@ -301,6 +301,7 @@ nouveau_screen_fini(struct nouveau_screen *screen)
    close(fd);
 
    disk_cache_destroy(screen->disk_shader_cache);
+   rpc_sync_end();
 }
 
 static void

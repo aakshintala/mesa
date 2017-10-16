@@ -113,7 +113,7 @@ static int
 nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 {
    printf("RPC: [nvc0_screen/resource] nvc0_screen_get_param\n");
-   rpc_sync();
+   rpc_sync_start();
    //rpc_nvc0_screen_get_param(param);
 
    const uint16_t class_3d = nouveau_screen(pscreen)->class_3d;
@@ -327,6 +327,8 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    }
 
    NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
+
+   rpc_sync_end();
    return 0;
 }
 
