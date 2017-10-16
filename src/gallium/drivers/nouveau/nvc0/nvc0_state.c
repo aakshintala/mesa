@@ -608,13 +608,15 @@ nvc0_sp_state_create(struct pipe_context *pipe,
 static void
 nvc0_sp_state_delete(struct pipe_context *pipe, void *hwcso)
 {
-   printf("TODO: [kernel] nvc0_sp_state_delete\n");
+   printf("RPC: [nvc0_state/kernel] nvc0_sp_state_delete\n");
+   rpc_sync_start("nvc0_sp_state_delete");
    struct nvc0_program *prog = (struct nvc0_program *)hwcso;
 
    nvc0_program_destroy(nvc0_context(pipe), prog);
 
    FREE((void *)prog->pipe.tokens);
    FREE(prog);
+   rpc_sync_end("nvc0_sp_state_delete");
 }
 
 static void *

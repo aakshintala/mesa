@@ -33,7 +33,8 @@ int nouveau_mesa_debug = 0;
 static const char *
 nouveau_screen_get_name(struct pipe_screen *pscreen)
 {
-   printf("TODO: [nouveau_screen] nouveau_screen_get_name\n");
+   printf("NRPC: [nouveau_screen] nouveau_screen_get_name\n");
+
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
    static char buffer[128];
 
@@ -79,7 +80,9 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle *pfence)
 {
    printf("TODO: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   rpc_sync_start("nouveau_screen_fence_ref");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
+   rpc_sync_end("nouveau_screen_fence_ref");
 }
 
 static boolean
@@ -88,11 +91,15 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   rpc_sync_start("nouveau_screen_fence_finish");
+   boolean rt;
    if (!timeout)
-      return nouveau_fence_signalled(nouveau_fence(pfence));
+      rt = nouveau_fence_signalled(nouveau_fence(pfence));
 
-   return nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   rpc_sync_end("nouveau_screen_fence_finish");
+   return rt;
 }
 
 
@@ -159,7 +166,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
 static void
 nouveau_disk_cache_create(struct nouveau_screen *screen)
 {
-   printf("TODO: [nouveau_screen] nouveau_disk_cache_create\n");
+   printf("RPC: [nouveau_screen] nouveau_disk_cache_create\n");
+   rpc_sync_start("nouveau_disk_cache_create");
    uint32_t mesa_timestamp;
    char *timestamp_str;
    int res;
@@ -174,12 +182,15 @@ nouveau_disk_cache_create(struct nouveau_screen *screen)
          free(timestamp_str);
       }
    }
+
+   rpc_sync_end("nouveau_disk_cache_create");
 }
 
 int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
-   printf("TODO: [nouveau_screen] nouveau_screen_ini\n");
+   printf("RPC: [nouveau_screen] nouveau_screen_ini\n");
+   rpc_sync_start("nouveau_screen_ini");
 
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };
@@ -277,6 +288,8 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
                                        NOUVEAU_BO_GART | NOUVEAU_BO_MAP,
                                        &mm_config);
    screen->mm_VRAM = nouveau_mm_create(dev, NOUVEAU_BO_VRAM, &mm_config);
+
+   rpc_sync_end("nouveau_screen_ini");
    return 0;
 }
 

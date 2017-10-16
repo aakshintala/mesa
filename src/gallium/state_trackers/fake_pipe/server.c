@@ -29,7 +29,7 @@ static xmlrpc_value* rpc_client_sync(xmlrpc_env* const envP,
     pthread_mutex_lock(&client_lock);   // client wait for server
 
     char *name;
-    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
     printf("%s\n", name);
 
@@ -44,7 +44,7 @@ static xmlrpc_value* rpc_server_sync_start(xmlrpc_env* const envP,
     pthread_mutex_lock(&server_lock); // block server pipe execution
 
     char *name;
-    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
     printf("%s\n", name);
 
@@ -57,7 +57,7 @@ static xmlrpc_value* rpc_server_sync_end(xmlrpc_env* const envP,
     pthread_mutex_unlock(&client_lock); // client wait for server
 
     char *name;
-    xmlrpc_decompose_value(envP, paramArrayP, "(s)", name);
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
     printf("%s\n", name);
 

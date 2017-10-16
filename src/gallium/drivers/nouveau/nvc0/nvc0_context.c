@@ -35,7 +35,8 @@ nvc0_flush(struct pipe_context *pipe,
            struct pipe_fence_handle **fence,
            unsigned flags)
 {
-   printf("TODO: [queue] nvc0_flush\n");
+   printf("RPC: [queue] nvc0_flush\n");
+   rpc_sync_start("nvc0_flush");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_screen *screen = &nvc0->screen->base;
 
@@ -45,6 +46,7 @@ nvc0_flush(struct pipe_context *pipe,
    PUSH_KICK(nvc0->base.pushbuf); /* fencing handled in kick_notify */
 
    nouveau_context_update_frame_stats(&nvc0->base);
+   rpc_sync_end("nvc0_flush");
 }
 
 static void
@@ -194,7 +196,8 @@ nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 static void
 nvc0_destroy(struct pipe_context *pipe)
 {
-   printf("TODO: [queue] nvc0_destroy\n");
+   printf("RPC: [queue] nvc0_destroy\n");
+   rpc_sync_start("nvc0_destroy");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
 
    if (nvc0->screen->cur_ctx == nvc0) {
@@ -216,6 +219,7 @@ nvc0_destroy(struct pipe_context *pipe)
    nvc0_blitctx_destroy(nvc0);
 
    nouveau_context_destroy(&nvc0->base);
+   rpc_sync_end("nvc0_destroy");
 }
 
 void

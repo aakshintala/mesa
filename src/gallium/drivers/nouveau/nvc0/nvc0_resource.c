@@ -3,18 +3,23 @@
 #include "nvc0/nvc0_resource.h"
 #include "nouveau_screen.h"
 
+#include "wrap.h"
 
 static struct pipe_resource *
 nvc0_resource_create(struct pipe_screen *screen,
                      const struct pipe_resource *templ)
 {
-   printf("TODO: [resource] nvc0_resource_create\n");
+   printf("RPC: [nvc0_resource_create/resource] nvc0_resource_create\n");
+   rpc_sync_start("nvc0_resource_create");
+   struct pipe_resource *ptr;
    switch (templ->target) {
    case PIPE_BUFFER:
-      return nouveau_buffer_create(screen, templ);
+      ptr = nouveau_buffer_create(screen, templ);
    default:
-      return nvc0_miptree_create(screen, templ);
+      ptr = nvc0_miptree_create(screen, templ);
    }
+   rpc_sync_end("nvc0_resource_create");
+   return ptr;
 }
 
 static struct pipe_resource *
