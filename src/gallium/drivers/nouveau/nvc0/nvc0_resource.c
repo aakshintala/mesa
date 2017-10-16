@@ -3,12 +3,14 @@
 #include "nvc0/nvc0_resource.h"
 #include "nouveau_screen.h"
 
+#include "wrap.h"
 
 static struct pipe_resource *
 nvc0_resource_create(struct pipe_screen *screen,
                      const struct pipe_resource *templ)
 {
-   printf("TODO: [resource] nvc0_resource_create\n");
+   printf("RPC: [resource] nvc0_resource_create\n");
+   rpc_sync("nvc0_resource_create");
    switch (templ->target) {
    case PIPE_BUFFER:
       return nouveau_buffer_create(screen, templ);

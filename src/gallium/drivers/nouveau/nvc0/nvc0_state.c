@@ -478,7 +478,7 @@ nvc0_bind_sampler_states(struct pipe_context *pipe,
                          unsigned start, unsigned nr, void **samplers)
 {
    printf("RPC: [kernel] nvc0_bind_sampler_states\n");
-   rpc_sync();
+   rpc_sync("nvc0_bind_sampler_states");
 
    const unsigned s = nvc0_shader_stage(shader);
 
@@ -562,7 +562,7 @@ nvc0_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
                        struct pipe_sampler_view **views)
 {
    printf("RPC: [kernel] nvc0_bind_sampler_views\n");
-   rpc_sync();
+   rpc_sync("nvc0_set_sampler_views");
 
    const unsigned s = nvc0_shader_stage(shader);
 
@@ -606,7 +606,8 @@ nvc0_sp_state_create(struct pipe_context *pipe,
 static void
 nvc0_sp_state_delete(struct pipe_context *pipe, void *hwcso)
 {
-   printf("TODO: [kernel] nvc0_sp_state_delete\n");
+   printf("RPC: [nvc0_state/kernel] nvc0_sp_state_delete\n");
+   rpc_sync("nvc0_sp_state_delete");
    struct nvc0_program *prog = (struct nvc0_program *)hwcso;
 
    nvc0_program_destroy(nvc0_context(pipe), prog);
@@ -723,7 +724,7 @@ static void
 nvc0_cp_state_bind(struct pipe_context *pipe, void *hwcso)
 {
     printf("RPC: [kernel] nvc0_cp_state_bind\n");
-    rpc_sync();
+    rpc_sync("nvc0_cp_state_bind");
 
     struct nvc0_context *nvc0 = nvc0_context(pipe);
 
@@ -737,7 +738,7 @@ nvc0_set_constant_buffer(struct pipe_context *pipe,
                          const struct pipe_constant_buffer *cb)
 {
    printf("RPC: [nvc0_state] nvc0_set_constant_buffer\n");
-   rpc_sync();
+   rpc_sync("nvc0_set_constant_buffer");
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct pipe_resource *res = cb ? cb->buffer : NULL;
@@ -1127,7 +1128,7 @@ nvc0_set_compute_resources(struct pipe_context *pipe,
                            struct pipe_surface **resources)
 {
    printf("RPC: [nvc0_state/kernel] nvc0_set_compute_resources\n");
-   rpc_sync();
+   rpc_sync("nvc0_set_compute_resources");
 
    nvc0_bind_surfaces_range(nvc0_context(pipe), 1, start, nr, resources);
 
@@ -1329,7 +1330,7 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
                          uint32_t **handles)
 {
    printf("RPC: [kernel] nvc0_set_global_bindings\n");
-   rpc_sync();
+   rpc_sync("nvc0_set_global_bindings");
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct pipe_resource **ptr;

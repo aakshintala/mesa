@@ -44,6 +44,17 @@
   #define SLEEP(seconds) sleep(seconds);
 #endif
 
+static xmlrpc_value *
+rpc_sync(xmlrpc_env *   const envP,
+           xmlrpc_value * const paramArrayP,
+           void *         const serverInfo,
+           void *         const channelInfo) {
+    char *name;
+    xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
+    printf("%s\n", name);
+    free((void *)name);
+    return xmlrpc_build_value(envP, "i", 0);
+}
 
 static xmlrpc_value *
 sample_add(xmlrpc_env *   const envP,
@@ -102,6 +113,17 @@ main(int           const argc,
     }
 
     xmlrpc_registry_add_method3(&env, registryP, &methodInfo);
+    if (env.fault_occurred) {
+        printf("xmlrpc_registry_add_method3() failed.  %s\n",
+               env.fault_string);
+        exit(1);
+    }
+
+    struct xmlrpc_method_info3 const methodInfo2 = {
+        /* .methodName     = */ "rpc_sync",
+        /* .methodFunction = */ &rpc_sync,
+    };
+    xmlrpc_registry_add_method3(&env, registryP, &methodInfo2);
     if (env.fault_occurred) {
         printf("xmlrpc_registry_add_method3() failed.  %s\n",
                env.fault_string);

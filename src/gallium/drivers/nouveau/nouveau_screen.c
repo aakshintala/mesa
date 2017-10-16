@@ -33,7 +33,8 @@ int nouveau_mesa_debug = 0;
 static const char *
 nouveau_screen_get_name(struct pipe_screen *pscreen)
 {
-   printf("TODO: [nouveau_screen] nouveau_screen_get_name\n");
+   printf("NRPC: [nouveau_screen] nouveau_screen_get_name\n");
+
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
    static char buffer[128];
 
@@ -78,7 +79,8 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
-   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   rpc_sync("nouveau_screen_fence_ref");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
 }
 
@@ -88,7 +90,8 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   rpc_sync("nouveau_screen_fence_finish");
    if (!timeout)
       return nouveau_fence_signalled(nouveau_fence(pfence));
 
@@ -159,7 +162,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
 static void
 nouveau_disk_cache_create(struct nouveau_screen *screen)
 {
-   printf("TODO: [nouveau_screen] nouveau_disk_cache_create\n");
+   printf("RPC: [nouveau_screen] nouveau_disk_cache_create\n");
+   rpc_sync("nouveau_disk_cache_create");
    uint32_t mesa_timestamp;
    char *timestamp_str;
    int res;
@@ -179,8 +183,9 @@ nouveau_disk_cache_create(struct nouveau_screen *screen)
 int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
-   printf("TODO: [nouveau_screen] nouveau_screen_ini\n");
-   hello();
+   printf("RPC: [nouveau_screen] nouveau_screen_ini\n");
+   rpc_sync("nouveau_screen_ini");
+
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };
    struct nvc0_fifo nvc0_data = { };
@@ -284,7 +289,7 @@ void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
    printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
-   rpc_sync();
+   rpc_sync("nouveau_screen_fini");
 
    int fd = screen->drm->fd;
 

@@ -11,7 +11,7 @@ void init_rpc_service(void);
 /* handlers */
 void rpc_nvc0_create(void *priv, unsigned ctxflags);
 void rpc_nvc0_screen_get_param(int param);
-void rpc_sync(void);
+void rpc_sync(const char *);
 
 void hello(void);
 

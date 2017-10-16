@@ -35,7 +35,8 @@ nvc0_flush(struct pipe_context *pipe,
            struct pipe_fence_handle **fence,
            unsigned flags)
 {
-   printf("TODO: [queue] nvc0_flush\n");
+   printf("RPC: [queue] nvc0_flush\n");
+   rpc_sync("nvc0_flush");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_screen *screen = &nvc0->screen->base;
 
@@ -60,7 +61,7 @@ static void
 nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
 {
    printf("RPC: [nvc0_context/kernel] nvc0_memory_barrier\n");
-   rpc_sync();
+   rpc_sync("nvc0_memory_barrier");
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
@@ -192,7 +193,8 @@ nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 static void
 nvc0_destroy(struct pipe_context *pipe)
 {
-   printf("TODO: [queue] nvc0_destroy\n");
+   printf("RPC: [queue] nvc0_destroy\n");
+   rpc_sync("nvc0_destroy");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
 
    if (nvc0->screen->cur_ctx == nvc0) {
@@ -354,7 +356,7 @@ nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
 {
    printf("RPC: [nvc0_context/queue] nvc0_create\n");
    //rpc_nvc0_create(priv, ctxflags);
-   rpc_sync();
+   rpc_sync("nvc0_create");
 
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nvc0_context *nvc0;

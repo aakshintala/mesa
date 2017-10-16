@@ -27,13 +27,13 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
     }
 }
 
-void rpc_sync(void)
+void rpc_sync(const char *name)
 {
     const char * const methodName = "rpc_sync";
     init_rpc_service();
 
     xmlrpc_value * resultP;
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(i)", 0);
+    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(s)", name);
     dieIfFaultOccurred(&env);
 
     xmlrpc_int32 ret;
