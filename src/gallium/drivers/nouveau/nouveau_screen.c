@@ -284,7 +284,7 @@ void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
    printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
-   rpc_sync_start();
+   rpc_sync_start("nouveau_screen_fini");
 
    int fd = screen->drm->fd;
 
@@ -301,7 +301,7 @@ nouveau_screen_fini(struct nouveau_screen *screen)
    close(fd);
 
    disk_cache_destroy(screen->disk_shader_cache);
-   rpc_sync_end();
+   rpc_sync_end("nouveau_screen_fini");
 }
 
 static void

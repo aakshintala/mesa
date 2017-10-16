@@ -60,7 +60,7 @@ static void
 nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
 {
    printf("RPC: [nvc0_context/kernel] nvc0_memory_barrier\n");
-   rpc_sync_start();
+   rpc_sync_start("nvc0_memory_barrier");
 
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
@@ -112,7 +112,7 @@ nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
    if (flags & (PIPE_BARRIER_VERTEX_BUFFER | PIPE_BARRIER_INDEX_BUFFER))
       nvc0->base.vbo_dirty = true;
 
-   rpc_sync_end();
+   rpc_sync_end("nvc0_memory_barrier");
 }
 
 static void
@@ -356,7 +356,7 @@ nvc0_create(struct pipe_screen *pscreen, void *priv, unsigned ctxflags)
 {
    printf("RPC: [nvc0_context/queue] nvc0_create\n");
    //rpc_nvc0_create(priv, ctxflags);
-   rpc_sync_start();
+   rpc_sync_start("nvc0_create");
 
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nvc0_context *nvc0;
@@ -492,7 +492,7 @@ out_err:
       FREE(nvc0);
    }
 
-   rpc_sync_end();
+   rpc_sync_end("nvc0_create");
    return NULL;
 }
 
