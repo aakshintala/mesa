@@ -674,6 +674,9 @@ nvc0_magic_3d_init(struct nouveau_pushbuf *push, uint16_t obj_class)
 static void
 nvc0_screen_fence_emit(struct pipe_screen *pscreen, u32 *sequence)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_fence_emit\n");
+   rpc_sync_start("nvc0_screen_fence_emit");
+
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nouveau_pushbuf *push = screen->base.pushbuf;
 
@@ -687,6 +690,8 @@ nvc0_screen_fence_emit(struct pipe_screen *pscreen, u32 *sequence)
    PUSH_DATA (push, *sequence);
    PUSH_DATA (push, NVC0_3D_QUERY_GET_FENCE | NVC0_3D_QUERY_GET_SHORT |
               (0xf << NVC0_3D_QUERY_GET_UNIT__SHIFT));
+
+   rpc_sync_end("nvc0_screen_fence_emit");
 }
 
 static u32
@@ -721,6 +726,9 @@ static int
 nvc0_screen_resize_tls_area(struct nvc0_screen *screen,
                             uint32_t lpos, uint32_t lneg, uint32_t cstack)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_resize_tls_area\n");
+   rpc_sync_start("nvc0_screen_resize_tls_area");
+
    struct nouveau_bo *bo = NULL;
    int ret;
    uint64_t size = (lpos + lneg) * 32 + cstack;
@@ -742,12 +750,17 @@ nvc0_screen_resize_tls_area(struct nvc0_screen *screen,
       return ret;
    nouveau_bo_ref(NULL, &screen->tls);
    screen->tls = bo;
+
+   rpc_sync_end("nvc0_screen_resize_tls_area");
    return 0;
 }
 
 int
 nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_resize_text_area\n");
+   rpc_sync_start("nvc0_screen_resize_text_area");
+
    struct nouveau_pushbuf *push = screen->base.pushbuf;
    struct nouveau_bo *bo;
    int ret;
@@ -778,6 +791,7 @@ nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
       PUSH_DATA (push, screen->text->offset);
    }
 
+   rpc_sync_end("nvc0_screen_resize_text_area");
    return 0;
 }
 

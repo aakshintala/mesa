@@ -35,7 +35,7 @@ nvc0_flush(struct pipe_context *pipe,
            struct pipe_fence_handle **fence,
            unsigned flags)
 {
-   printf("RPC: [queue] nvc0_flush\n");
+   printf("RPC: [nvc0_context/queue] nvc0_flush\n");
    rpc_sync_start("nvc0_flush");
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_screen *screen = &nvc0->screen->base;
@@ -144,6 +144,9 @@ nvc0_emit_string_marker(struct pipe_context *pipe, const char *str, int len)
 static void
 nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 {
+   printf("RPC: [nvc0_context] nvc0_context_unreference_resources\n");
+   rpc_sync_start("nvc0_context_unreference_resources");
+
    unsigned s, i;
 
    nouveau_bufctx_del(&nvc0->bufctx_3d);
@@ -191,6 +194,8 @@ nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 
    if (nvc0->tcp_empty)
       nvc0->base.pipe.delete_tcs_state(&nvc0->base.pipe, nvc0->tcp_empty);
+
+   rpc_sync_end("nvc0_context_unreference_resources");
 }
 
 static void
@@ -225,6 +230,9 @@ nvc0_destroy(struct pipe_context *pipe)
 void
 nvc0_default_kick_notify(struct nouveau_pushbuf *push)
 {
+   printf("RPC: [nvc0_context] nvc0_default_kick_notify\n");
+   rpc_sync_start("nvc0_default_kick_notify");
+
    struct nvc0_screen *screen = push->user_priv;
 
    if (screen) {
@@ -234,6 +242,8 @@ nvc0_default_kick_notify(struct nouveau_pushbuf *push)
          screen->cur_ctx->state.flushed = true;
       NOUVEAU_DRV_STAT(&screen->base, pushbuf_count, 1);
    }
+
+   rpc_sync_end("nvc0_default_kick_notify");
 }
 
 static int
@@ -504,6 +514,9 @@ void
 nvc0_bufctx_fence(struct nvc0_context *nvc0, struct nouveau_bufctx *bufctx,
                   bool on_flush)
 {
+   printf("RPC: [nvc0_context] nvc0_bufctx_fence\n");
+   rpc_sync_start("nvc0_bufctx_fence");
+
    struct nouveau_list *list = on_flush ? &bufctx->current : &bufctx->pending;
    struct nouveau_list *it;
    NOUVEAU_DRV_STAT_IFD(unsigned count = 0);
@@ -516,6 +529,8 @@ nvc0_bufctx_fence(struct nvc0_context *nvc0, struct nouveau_bufctx *bufctx,
       NOUVEAU_DRV_STAT_IFD(count++);
    }
    NOUVEAU_DRV_STAT(&nvc0->screen->base, resource_validate_count, count);
+
+   rpc_sync_end("nvc0_bufctx_fence");
 }
 
 const void *
