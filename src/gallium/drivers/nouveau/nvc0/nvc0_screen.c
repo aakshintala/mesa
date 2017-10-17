@@ -672,6 +672,9 @@ nvc0_magic_3d_init(struct nouveau_pushbuf *push, uint16_t obj_class)
 static void
 nvc0_screen_fence_emit(struct pipe_screen *pscreen, u32 *sequence)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_fence_emit\n");
+   rpc_sync("nvc0_screen_fence_emit");
+
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nouveau_pushbuf *push = screen->base.pushbuf;
 
@@ -697,6 +700,8 @@ nvc0_screen_fence_update(struct pipe_screen *pscreen)
 static int
 nvc0_screen_init_compute(struct nvc0_screen *screen)
 {
+   printf("NRPC: [nvc0_screen] nvc0_screen_init_compute\n");
+
    screen->base.base.get_compute_param = nvc0_screen_get_compute_param;
 
    switch (screen->base.device->chipset & ~0xf) {
@@ -719,6 +724,9 @@ static int
 nvc0_screen_resize_tls_area(struct nvc0_screen *screen,
                             uint32_t lpos, uint32_t lneg, uint32_t cstack)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_resize_tls_area\n");
+   rpc_sync("nvc0_screen_resize_tls_area");
+
    struct nouveau_bo *bo = NULL;
    int ret;
    uint64_t size = (lpos + lneg) * 32 + cstack;
@@ -746,6 +754,9 @@ nvc0_screen_resize_tls_area(struct nvc0_screen *screen,
 int
 nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
 {
+   printf("RPC: [nvc0_screen] nvc0_screen_resize_text_area\n");
+   rpc_sync("nvc0_screen_resize_text_area");
+
    struct nouveau_pushbuf *push = screen->base.pushbuf;
    struct nouveau_bo *bo;
    int ret;
@@ -788,6 +799,8 @@ nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
 struct nouveau_screen *
 nvc0_screen_create(struct nouveau_device *dev)
 {
+   printf("TODO: [nvc0_screen] nvc0_screen_create\n");
+
    struct nvc0_screen *screen;
    struct pipe_screen *pscreen;
    struct nouveau_object *chan;
@@ -1284,6 +1297,8 @@ fail:
 int
 nvc0_screen_tic_alloc(struct nvc0_screen *screen, void *entry)
 {
+   printf("TODO: [nvc0_screen] nvc0_screen_tic_alloc\n");
+
    int i = screen->tic.next;
 
    while (screen->tic.lock[i / 32] & (1 << (i % 32)))
@@ -1301,6 +1316,8 @@ nvc0_screen_tic_alloc(struct nvc0_screen *screen, void *entry)
 int
 nvc0_screen_tsc_alloc(struct nvc0_screen *screen, void *entry)
 {
+   printf("TODO: [nvc0_screen] nvc0_screen_tsc_alloc\n");
+
    int i = screen->tsc.next;
 
    while (screen->tsc.lock[i / 32] & (1 << (i % 32)))

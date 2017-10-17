@@ -51,6 +51,8 @@ nvc0_flush(struct pipe_context *pipe,
 static void
 nvc0_texture_barrier(struct pipe_context *pipe, unsigned flags)
 {
+   printf("TODO: [nvc0_context] nvc0_texture_barrier\n");
+
    struct nouveau_pushbuf *push = nvc0_context(pipe)->base.pushbuf;
 
    IMMED_NVC0(push, NVC0_3D(SERIALIZE), 0);
@@ -117,6 +119,8 @@ nvc0_memory_barrier(struct pipe_context *pipe, unsigned flags)
 static void
 nvc0_emit_string_marker(struct pipe_context *pipe, const char *str, int len)
 {
+   printf("TODO: [nvc0_context] nvc0_emit_string_marker\n");
+
    struct nouveau_pushbuf *push = nvc0_context(pipe)->base.pushbuf;
    int string_words = len / 4;
    int data_words;
@@ -141,6 +145,9 @@ nvc0_emit_string_marker(struct pipe_context *pipe, const char *str, int len)
 static void
 nvc0_context_unreference_resources(struct nvc0_context *nvc0)
 {
+   printf("RPC: [nvc0_context] nvc0_context_unreference_resources\n");
+   rpc_sync("nvc0_context_unreference_resources");
+
    unsigned s, i;
 
    nouveau_bufctx_del(&nvc0->bufctx_3d);
@@ -221,6 +228,9 @@ nvc0_destroy(struct pipe_context *pipe)
 void
 nvc0_default_kick_notify(struct nouveau_pushbuf *push)
 {
+   printf("RPC: [nvc0_context] nvc0_default_kick_notify\n");
+   rpc_sync("nvc0_default_kick_notify");
+
    struct nvc0_screen *screen = push->user_priv;
 
    if (screen) {
@@ -237,6 +247,7 @@ nvc0_invalidate_resource_storage(struct nouveau_context *ctx,
                                  struct pipe_resource *res,
                                  int ref)
 {
+   printf("TODO: [nvc0_context] nvc0_invalidate_resource_storage\n");
    struct nvc0_context *nvc0 = nvc0_context(&ctx->pipe);
    unsigned s, i;
 
@@ -498,6 +509,9 @@ void
 nvc0_bufctx_fence(struct nvc0_context *nvc0, struct nouveau_bufctx *bufctx,
                   bool on_flush)
 {
+   printf("RPC: [nvc0_context] nvc0_bufctx_fence\n");
+   rpc_sync("nvc0_bufctx_fence");
+
    struct nouveau_list *list = on_flush ? &bufctx->current : &bufctx->pending;
    struct nouveau_list *it;
    NOUVEAU_DRV_STAT_IFD(unsigned count = 0);

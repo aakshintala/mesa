@@ -357,6 +357,7 @@ nvc0_compute_validate_surfaces(struct nvc0_context *nvc0)
     * fragment shaders are used inside the same context. Anyway, we definitely
     * have invalidation issues between 3D and CP for other resources like SSBO
     * and atomic counters. */
+   printf("TODO: [nvc0_compute] nvc0_compute_validate_surfaces\n");
    nvc0_compute_invalidate_surfaces(nvc0, 4);
    nvc0_compute_invalidate_surfaces(nvc0, 5);
 
@@ -383,6 +384,7 @@ validate_list_cp[] = {
 static bool
 nvc0_state_validate_cp(struct nvc0_context *nvc0, uint32_t mask)
 {
+   printf("TODO: [nvc0_compute] nvc0_state_validate_cp\n");
    bool ret;
 
    ret = nvc0_state_validate(nvc0, mask, validate_list_cp,
@@ -398,6 +400,7 @@ static void
 nvc0_compute_upload_input(struct nvc0_context *nvc0,
                           const struct pipe_grid_info *info)
 {
+   printf("TODO: [nvc0_compute] nvc0_compute_upload_input\n");
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_screen *screen = nvc0->screen;
    struct nvc0_program *cp = nvc0->compprog;

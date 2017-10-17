@@ -1140,6 +1140,8 @@ nvc0_bind_images_range(struct nvc0_context *nvc0, const unsigned s,
                        unsigned start, unsigned nr,
                        const struct pipe_image_view *pimages)
 {
+   printf("TODO: [nvc0_state] nvc0_bind_images_range\n");
+
    const unsigned end = start + nr;
    unsigned mask = 0;
    unsigned i;
@@ -1230,6 +1232,8 @@ nvc0_set_shader_images(struct pipe_context *pipe,
                        unsigned start, unsigned nr,
                        const struct pipe_image_view *images)
 {
+   printf("TODO: [nvc0_state] nvc0_set_shader_images\n");
+
    const unsigned s = nvc0_shader_stage(shader);
    if (!nvc0_bind_images_range(nvc0_context(pipe), s, start, nr, images))
       return;
@@ -1245,6 +1249,8 @@ nvc0_bind_buffers_range(struct nvc0_context *nvc0, const unsigned t,
                         unsigned start, unsigned nr,
                         const struct pipe_shader_buffer *pbuffers)
 {
+   printf("TODO: [nvc0_state] nvc0_bind_buffers_range\n");
+
    const unsigned end = start + nr;
    unsigned mask = 0;
    unsigned i;
@@ -1295,6 +1301,8 @@ nvc0_set_shader_buffers(struct pipe_context *pipe,
                         unsigned start, unsigned nr,
                         const struct pipe_shader_buffer *buffers)
 {
+   printf("TODO: [nvc0_state] nvc0_set_shader_buffers\n");
+
    const unsigned s = nvc0_shader_stage(shader);
    if (!nvc0_bind_buffers_range(nvc0_context(pipe), s, start, nr, buffers))
       return;
@@ -1308,6 +1316,8 @@ nvc0_set_shader_buffers(struct pipe_context *pipe,
 static inline void
 nvc0_set_global_handle(uint32_t *phandle, struct pipe_resource *res)
 {
+   printf("NRPC: [nvc0_state] nvc0_set_global_handle\n");
+
    struct nv04_resource *buf = nv04_resource(res);
    if (buf) {
       uint64_t limit = (buf->address + buf->base.width0) - 1;

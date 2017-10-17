@@ -9,7 +9,7 @@ static struct pipe_resource *
 nvc0_resource_create(struct pipe_screen *screen,
                      const struct pipe_resource *templ)
 {
-   printf("RPC: [resource] nvc0_resource_create\n");
+   printf("RPC: [nvc0_resource/resource] nvc0_resource_create\n");
    rpc_sync("nvc0_resource_create");
    switch (templ->target) {
    case PIPE_BUFFER:
@@ -25,6 +25,8 @@ nvc0_resource_from_handle(struct pipe_screen * screen,
                           struct winsys_handle *whandle,
                           unsigned usage)
 {
+   printf("TODO: [nvc0_resource] nvc0_resource_from_handle\n");
+
    if (templ->target == PIPE_BUFFER) {
       return NULL;
    } else {
@@ -41,7 +43,7 @@ nvc0_surface_create(struct pipe_context *pipe,
                     struct pipe_resource *pres,
                     const struct pipe_surface *templ)
 {
-   printf("TODO: [resource] nvc0_surface_create\n");
+   printf("TODO: [nvc0_resource/resource] nvc0_surface_create\n");
    if (unlikely(pres->target == PIPE_BUFFER))
       return nv50_surface_from_buffer(pipe, pres, templ);
    return nvc0_miptree_surface_new(pipe, pres, templ);
