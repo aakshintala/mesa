@@ -11,12 +11,16 @@
 
 #define SLEEP(seconds) sleep(seconds);
 
-#define NAME "Xmlrpc-c Sync Client"
+#define NAME "Xmlrpc-c Srv Client"
 #define VERSION "1.0"
 
 static xmlrpc_env env;
-const char * const serverUrl = "http://localhost:8888/RPC2";
-const char * const methodName = "sample.add";
+const char * const serverUrl = "http://127.0.0.1:8888/RPC2";
+const char * const sync_start = "rpc_server_sync_start";
+const char * const sync_end = "rpc_server_sync_end";
+
+static int toppest = 0;
+static int has_rpc = 0;
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -29,11 +33,15 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync_start(const char *name)
 {
-    const char * const methodName = "rpc_server_sync_start";
+    if (!toppest)
+        toppest = 1;
+    else
+        return;
+    has_rpc = 1;
     init_rpc_service();
 
     xmlrpc_value * resultP;
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(s)", name);
+    resultP = xmlrpc_client_call(&env, serverUrl, sync_start, "(s)", name);
     dieIfFaultOccurred(&env);
 
     xmlrpc_int32 ret;
@@ -47,11 +55,12 @@ void rpc_sync_start(const char *name)
 
 void rpc_sync_end(const char *name)
 {
-    const char * const methodName = "rpc_server_sync_end";
+    if (!has_rpc)
+        return;
     init_rpc_service();
 
     xmlrpc_value * resultP;
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(s)", name);
+    resultP = xmlrpc_client_call(&env, serverUrl, sync_end, "(s)", name);
     dieIfFaultOccurred(&env);
 
     xmlrpc_int32 ret;
@@ -61,6 +70,9 @@ void rpc_sync_end(const char *name)
         printf("oops, something went wrong..\n");
 
     xmlrpc_DECREF(resultP);
+
+    toppest = 0;
+    has_rpc = 0;
 }
 
 void init_rpc_service(void)

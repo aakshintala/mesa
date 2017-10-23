@@ -79,7 +79,7 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
-   printf("TODO: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_ref\n");
    rpc_sync_start("nouveau_screen_fence_ref");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
    rpc_sync_end("nouveau_screen_fence_ref");
@@ -166,8 +166,9 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
 static void
 nouveau_disk_cache_create(struct nouveau_screen *screen)
 {
-   printf("RPC: [nouveau_screen] nouveau_disk_cache_create\n");
-   rpc_sync_start("nouveau_disk_cache_create");
+   // called in nouveau_screen_init
+   printf("NRPC: [nouveau_screen] nouveau_disk_cache_create\n");
+
    uint32_t mesa_timestamp;
    char *timestamp_str;
    int res;
@@ -182,15 +183,13 @@ nouveau_disk_cache_create(struct nouveau_screen *screen)
          free(timestamp_str);
       }
    }
-
-   rpc_sync_end("nouveau_disk_cache_create");
 }
 
 int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
-   printf("RPC: [nouveau_screen] nouveau_screen_ini\n");
-   rpc_sync_start("nouveau_screen_ini");
+   printf("RPC: [nouveau_screen] nouveau_screen_init\n");
+   rpc_sync_start("nouveau_screen_init");
 
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };
@@ -236,17 +235,24 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 
    ret = nouveau_object_new(&dev->object, 0, NOUVEAU_FIFO_CHANNEL_CLASS,
                             data, size, &screen->channel);
-   if (ret)
+   if (ret) {
+      rpc_sync_end("nouveau_screen_init");
       return ret;
+   }
 
    ret = nouveau_client_new(screen->device, &screen->client);
-   if (ret)
+   if (ret) {
+      rpc_sync_end("nouveau_screen_init");
       return ret;
+   }
+
    ret = nouveau_pushbuf_new(screen->client, screen->channel,
                              4, 512 * 1024, 1,
                              &screen->pushbuf);
-   if (ret)
+   if (ret) {
+      rpc_sync_end("nouveau_screen_init");
       return ret;
+   }
 
    /* getting CPU time first appears to be more accurate */
    screen->cpu_gpu_time_delta = os_time_get();
@@ -289,7 +295,7 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
                                        &mm_config);
    screen->mm_VRAM = nouveau_mm_create(dev, NOUVEAU_BO_VRAM, &mm_config);
 
-   rpc_sync_end("nouveau_screen_ini");
+   rpc_sync_end("nouveau_screen_init");
    return 0;
 }
 

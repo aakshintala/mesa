@@ -112,9 +112,8 @@ nvc0_screen_is_format_supported(struct pipe_screen *pscreen,
 static int
 nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 {
-   printf("RPC: [nvc0_screen/resource] nvc0_screen_get_param\n");
-   rpc_sync_start("nvc0_screen_get_param");
-   //rpc_nvc0_screen_get_param(param);
+   // can be faked on client
+   printf("NRPC: [nvc0_screen/resource] nvc0_screen_get_param\n");
 
    const uint16_t class_3d = nouveau_screen(pscreen)->class_3d;
    struct nouveau_device *dev = nouveau_screen(pscreen)->device;
@@ -328,7 +327,6 @@ nvc0_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
 
    NOUVEAU_ERR("unknown PIPE_CAP %d\n", param);
 
-   rpc_sync_end("nvc0_screen_get_param");
    return 0;
 }
 

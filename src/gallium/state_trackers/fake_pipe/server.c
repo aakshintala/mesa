@@ -25,13 +25,15 @@ pthread_mutex_t server_lock;
 static xmlrpc_value* rpc_client_sync(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
+    printf("client_sync: server_unlock\n");
     pthread_mutex_unlock(&server_lock); // server continues pipe execution
+    printf("client_sync: client_lock\n");
     pthread_mutex_lock(&client_lock);   // client wait for server
 
     char *name;
     xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
-    printf("%s\n", name);
+    printf("client: %s\n", name);
 
     pthread_mutex_unlock(&client_lock); // client continues execution
     return xmlrpc_build_value(envP, "i", 0);
@@ -40,13 +42,15 @@ static xmlrpc_value* rpc_client_sync(xmlrpc_env* const envP,
 static xmlrpc_value* rpc_server_sync_start(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
+    printf("server_sync_start: client_lock\n");
     pthread_mutex_lock(&client_lock); // client wait for server
+    printf("server_sync_start: server_lock\n");
     pthread_mutex_lock(&server_lock); // block server pipe execution
 
     char *name;
     xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
-    printf("%s\n", name);
+    printf("server_start: %s\n", name);
 
     return xmlrpc_build_value(envP, "i", 0);
 }
@@ -54,12 +58,13 @@ static xmlrpc_value* rpc_server_sync_start(xmlrpc_env* const envP,
 static xmlrpc_value* rpc_server_sync_end(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
+    printf("server_sync_end: client_unlock\n");
     pthread_mutex_unlock(&client_lock); // client wait for server
 
     char *name;
     xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
     RETURN_IF_FAULT(envP);
-    printf("%s\n", name);
+    printf("server_end: %s\n", name);
 
     return xmlrpc_build_value(envP, "i", 0);
 }
