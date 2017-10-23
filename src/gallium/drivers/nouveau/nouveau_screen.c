@@ -79,8 +79,8 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
-   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_ref\n");
-   rpc_sync("nouveau_screen_fence_ref");
+   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   // rpc_sync("nouveau_screen_fence_ref");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
 }
 
@@ -90,8 +90,8 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_finish\n");
-   rpc_sync("nouveau_screen_fence_finish");
+   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   // rpc_sync("nouveau_screen_fence_finish");
    if (!timeout)
       return nouveau_fence_signalled(nouveau_fence(pfence));
 
@@ -288,8 +288,8 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
-   printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
-   rpc_sync("nouveau_screen_fini");
+   printf("FIXME: [nouveau_screen] nouveau_screen_fini\n");
+   // rpc_sync("nouveau_screen_fini");
 
    int fd = screen->drm->fd;
 
