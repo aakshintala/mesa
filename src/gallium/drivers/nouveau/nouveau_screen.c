@@ -162,8 +162,8 @@ nouveau_screen_bo_get_handle(struct pipe_screen *pscreen,
 static void
 nouveau_disk_cache_create(struct nouveau_screen *screen)
 {
-   printf("RPC: [nouveau_screen] nouveau_disk_cache_create\n");
-   rpc_sync("nouveau_disk_cache_create");
+   printf("NRPC: [nouveau_screen] nouveau_disk_cache_create\n");
+
    uint32_t mesa_timestamp;
    char *timestamp_str;
    int res;
@@ -183,8 +183,8 @@ nouveau_disk_cache_create(struct nouveau_screen *screen)
 int
 nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 {
-   printf("RPC: [nouveau_screen] nouveau_screen_ini\n");
-   rpc_sync("nouveau_screen_ini");
+   printf("RPC: [nouveau_screen] nouveau_screen_init\n");
+   rpc_sync("nouveau_screen_init");
 
    struct pipe_screen *pscreen = &screen->base;
    struct nv04_fifo nv04_data = { .vram = 0xbeef0201, .gart = 0xbeef0202 };

@@ -29,6 +29,13 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync(const char *name)
 {
+    static int toppest = 0;
+    // only send RPCs for the toppest-level pipe functions
+    if (!toppest)
+        toppest = 1;
+    else
+        return;
+
     init_rpc_service();
 
     xmlrpc_value * resultP;
@@ -42,47 +49,8 @@ void rpc_sync(const char *name)
         printf("oops, something went wrong..\n");
 
     xmlrpc_DECREF(resultP);
-}
 
-void rpc_nvc0_create(void *priv, unsigned ctxflags)
-{
-    const char * const methodName = "nvc0_create";
-    init_rpc_service();
-
-    xmlrpc_value * resultP;
-    char *private = priv;
-    if (private == NULL)
-        private = "";
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(si)",
-        private, (xmlrpc_int32)ctxflags);
-    dieIfFaultOccurred(&env);
-
-    xmlrpc_int32 ret;
-    xmlrpc_read_int(&env, resultP, &ret);
-    dieIfFaultOccurred(&env);
-    if (ret != 0)
-        printf("oops, something went wrong..\n");
-
-    xmlrpc_DECREF(resultP);
-}
-
-void rpc_nvc0_screen_get_param(int param)
-{
-    const char * const methodName = "nvc0_screen_get_param";
-    init_rpc_service();
-
-    xmlrpc_value * resultP;
-    resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(i)",
-        (xmlrpc_int32)param);
-    dieIfFaultOccurred(&env);
-
-    xmlrpc_int32 ret;
-    xmlrpc_read_int(&env, resultP, &ret);
-    dieIfFaultOccurred(&env);
-    if (ret != 0)
-        printf("oops, something went wrong..\n");
-
-    xmlrpc_DECREF(resultP);
+    toppest = 0;
 }
 
 void hello(void)
