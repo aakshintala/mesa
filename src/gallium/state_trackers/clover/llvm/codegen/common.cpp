@@ -249,7 +249,7 @@ clover::llvm::build_tgsi_common( const Module &mod,
                              make_kernel_args(mod, name, c));
    }
 
-   struct tgsi_token prog[1024];
+   struct tgsi_token prog[10240];
    if (!tgsi_text_translate(&code[0], prog, ARRAY_SIZE(prog))) {
       fail(r_log, build_error(),"Couldn't translate TGSI.");
    }
