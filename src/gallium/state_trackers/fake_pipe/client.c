@@ -15,8 +15,8 @@
 #define VERSION "1.0"
 
 static xmlrpc_env env;
-const char * const serverUrl = "http://localhost:8888/RPC2";
-const char * const methodName = "sample.add";
+const char * const serverUrl = "http://192.168.122.249:8888/RPC2";
+const char * const methodName = "rpc_client_sync";
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -29,7 +29,6 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync(const char *name)
 {
-    const char * const methodName = "rpc_sync";
     init_rpc_service();
 
     xmlrpc_value * resultP;
@@ -85,8 +84,10 @@ void rpc_nvc0_screen_get_param(int param)
 
     xmlrpc_DECREF(resultP);
 }
+
 void hello(void)
 {
+    const char * const methodName = "sample.add";
     init_rpc_service();
 
     printf("Making XMLRPC call to server url '%s' method '%s' "
