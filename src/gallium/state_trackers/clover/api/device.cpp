@@ -26,7 +26,7 @@
 #include "git_sha1.h"
 #include "pipe/p_screen.h"
 
-#include "rpc.h"
+//#include "rpc.h"
 
 using namespace clover;
 
@@ -105,6 +105,7 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
 
    /* para-virt server starts */
 
+   /*
    if (size == 54321 && r_size == NULL) {
        std::cout << "Para-virt server starts\n";
        std::cout << "Platform has " << dev.platform.devs.size()
@@ -115,11 +116,13 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
 
        rpc_server->Wait();
    }
+   */
 
    /* para-virt server ends */
 
    /* para-virt server handler starts */
 
+   /*
    if (size == 54321) {
        const Call *call = (const Call *)r_buf;
        Response *response = (Response *)r_size;
@@ -128,6 +131,7 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
 
        return CL_SUCCESS;
    }
+   */
 
    /* para-virt server handler ends */
 

@@ -29,7 +29,7 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync_start(const char *name)
 {
-    const char * const methodName = "rpc_sync_start";
+    const char * const methodName = "rpc_server_sync_start";
     init_rpc_service();
 
     xmlrpc_value * resultP;
@@ -47,7 +47,7 @@ void rpc_sync_start(const char *name)
 
 void rpc_sync_end(const char *name)
 {
-    const char * const methodName = "rpc_sync_end";
+    const char * const methodName = "rpc_server_sync_end";
     init_rpc_service();
 
     xmlrpc_value * resultP;
