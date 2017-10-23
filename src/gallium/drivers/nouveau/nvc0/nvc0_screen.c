@@ -672,8 +672,9 @@ nvc0_magic_3d_init(struct nouveau_pushbuf *push, uint16_t obj_class)
 static void
 nvc0_screen_fence_emit(struct pipe_screen *pscreen, u32 *sequence)
 {
-   printf("RPC: [nvc0_screen] nvc0_screen_fence_emit\n");
-   rpc_sync_start("nvc0_screen_fence_emit");
+   // current fence is inserted to ad-hoc places
+   printf("FIXME: [nvc0_screen] nvc0_screen_fence_emit\n");
+   // rpc_sync_start("nvc0_screen_fence_emit");
 
    struct nvc0_screen *screen = nvc0_screen(pscreen);
    struct nouveau_pushbuf *push = screen->base.pushbuf;
@@ -689,7 +690,7 @@ nvc0_screen_fence_emit(struct pipe_screen *pscreen, u32 *sequence)
    PUSH_DATA (push, NVC0_3D_QUERY_GET_FENCE | NVC0_3D_QUERY_GET_SHORT |
               (0xf << NVC0_3D_QUERY_GET_UNIT__SHIFT));
 
-   rpc_sync_end("nvc0_screen_fence_emit");
+   // rpc_sync_end("nvc0_screen_fence_emit");
 }
 
 static u32

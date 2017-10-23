@@ -79,10 +79,10 @@ nouveau_screen_fence_ref(struct pipe_screen *pscreen,
                          struct pipe_fence_handle **ptr,
                          struct pipe_fence_handle *pfence)
 {
-   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_ref\n");
-   rpc_sync_start("nouveau_screen_fence_ref");
+   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_ref\n");
+   // rpc_sync_start("nouveau_screen_fence_ref");
    nouveau_fence_ref(nouveau_fence(pfence), (struct nouveau_fence **)ptr);
-   rpc_sync_end("nouveau_screen_fence_ref");
+   // rpc_sync_end("nouveau_screen_fence_ref");
 }
 
 static boolean
@@ -91,14 +91,14 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("RPC: [nouveau_screen/event] nouveau_screen_fence_finish\n");
-   rpc_sync_start("nouveau_screen_fence_finish");
+   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   // rpc_sync_start("nouveau_screen_fence_finish");
    boolean rt;
    if (!timeout)
       rt = nouveau_fence_signalled(nouveau_fence(pfence));
 
    rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
-   rpc_sync_end("nouveau_screen_fence_finish");
+   // rpc_sync_end("nouveau_screen_fence_finish");
    return rt;
 }
 
@@ -302,8 +302,8 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
 void
 nouveau_screen_fini(struct nouveau_screen *screen)
 {
-   printf("RPC: [nouveau_screen] nouveau_screen_fini\n");
-   rpc_sync_start("nouveau_screen_fini");
+   printf("FIXME: [nouveau_screen] nouveau_screen_fini\n");
+   // rpc_sync_start("nouveau_screen_fini");
 
    int fd = screen->drm->fd;
 
@@ -320,7 +320,7 @@ nouveau_screen_fini(struct nouveau_screen *screen)
    close(fd);
 
    disk_cache_destroy(screen->disk_shader_cache);
-   rpc_sync_end("nouveau_screen_fini");
+   // rpc_sync_end("nouveau_screen_fini");
 }
 
 static void
