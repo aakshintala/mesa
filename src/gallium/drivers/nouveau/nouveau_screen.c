@@ -92,10 +92,16 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
 {
    printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_finish\n");
    // rpc_sync("nouveau_screen_fence_finish");
-   if (!timeout)
-      return nouveau_fence_signalled(nouveau_fence(pfence));
+   rpc_sync_start();
 
-   return nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   boolean rt;
+   if (!timeout)
+      rt = nouveau_fence_signalled(nouveau_fence(pfence));
+
+   rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
+
+   rpc_sync_end();
+   return rt;
 }
 
 
@@ -239,8 +245,10 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
    ret = nouveau_pushbuf_new(screen->client, screen->channel,
                              4, 512 * 1024, 1,
                              &screen->pushbuf);
-   if (ret)
+   if (ret) {
+      rpc_sync_end();
       return ret;
+   }
 
    /* getting CPU time first appears to be more accurate */
    screen->cpu_gpu_time_delta = os_time_get();
@@ -282,6 +290,8 @@ nouveau_screen_init(struct nouveau_screen *screen, struct nouveau_device *dev)
                                        NOUVEAU_BO_GART | NOUVEAU_BO_MAP,
                                        &mm_config);
    screen->mm_VRAM = nouveau_mm_create(dev, NOUVEAU_BO_VRAM, &mm_config);
+
+   rpc_sync_end();
    return 0;
 }
 

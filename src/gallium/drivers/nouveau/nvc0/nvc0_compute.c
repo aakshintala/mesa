@@ -142,6 +142,7 @@ nvc0_screen_compute_setup(struct nvc0_screen *screen,
    PUSH_DATA (push, 3); /* 7 */
    PUSH_DATA (push, 1);
 
+   rpc_sync_end();
    return 0;
 }
 
@@ -325,6 +326,7 @@ nvc0_compute_validate_globals(struct nvc0_context *nvc0)
          nvc0_add_resident(nvc0->bufctx_cp, NVC0_BIND_CP_GLOBAL,
                            nv04_resource(res), NOUVEAU_BO_RDWR);
    }
+   rpc_sync_end();
 }
 
 static inline void

@@ -17,6 +17,7 @@
 static xmlrpc_env env;
 const char * const serverUrl = "http://192.168.122.249:8888/RPC2";
 const char * const methodName = "rpc_client_sync";
+static int toppest = 3;
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -29,12 +30,11 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync(const char *name)
 {
-    static int toppest = 0;
+    printf("sync_%s, level=%d\n", name, toppest);
     // only send RPCs for the toppest-level pipe functions
-    if (!toppest)
-        toppest = 1;
-    else
+    if (toppest++ > 0)
         return;
+    printf("enter_%s, level=%d\n", name, toppest);
 
     init_rpc_service();
 
@@ -49,8 +49,14 @@ void rpc_sync(const char *name)
         printf("oops, something went wrong..\n");
 
     xmlrpc_DECREF(resultP);
+}
 
-    toppest = 0;
+void rpc_sync_start(void) {
+    toppest++;
+}
+
+void rpc_sync_end(void) {
+    toppest--;
 }
 
 void hello(void)

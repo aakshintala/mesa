@@ -744,10 +744,14 @@ nvc0_screen_resize_tls_area(struct nvc0_screen *screen,
 
    ret = nouveau_bo_new(screen->base.device, NV_VRAM_DOMAIN(&screen->base), 1 << 17, size,
                         NULL, &bo);
-   if (ret)
+   if (ret) {
+      rpc_sync_end();
       return ret;
+   }
    nouveau_bo_ref(NULL, &screen->tls);
    screen->tls = bo;
+
+   rpc_sync_end();
    return 0;
 }
 
@@ -763,8 +767,10 @@ nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
 
    ret = nouveau_bo_new(screen->base.device, NV_VRAM_DOMAIN(&screen->base),
                         1 << 17, size, NULL, &bo);
-   if (ret)
+   if (ret) {
+      rpc_sync_end();
       return ret;
+   }
 
    nouveau_bo_ref(NULL, &screen->text);
    screen->text = bo;
@@ -787,6 +793,7 @@ nvc0_screen_resize_text_area(struct nvc0_screen *screen, uint64_t size)
       PUSH_DATA (push, screen->text->offset);
    }
 
+   rpc_sync_end();
    return 0;
 }
 

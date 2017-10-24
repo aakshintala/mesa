@@ -11,12 +11,16 @@ nvc0_resource_create(struct pipe_screen *screen,
 {
    printf("RPC: [nvc0_resource/resource] nvc0_resource_create\n");
    rpc_sync("nvc0_resource_create");
+   struct pipe_resource *ptr;
    switch (templ->target) {
    case PIPE_BUFFER:
-      return nouveau_buffer_create(screen, templ);
+      ptr = nouveau_buffer_create(screen, templ);
    default:
-      return nvc0_miptree_create(screen, templ);
+      ptr = nvc0_miptree_create(screen, templ);
    }
+
+   rpc_sync_end();
+   return ptr;
 }
 
 static struct pipe_resource *

@@ -489,6 +489,8 @@ nvc0_bind_sampler_states(struct pipe_context *pipe,
       nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_SAMPLERS;
    else
       nvc0_context(pipe)->dirty_3d |= NVC0_NEW_3D_SAMPLERS;
+
+   rpc_sync_end();
 }
 
 
@@ -573,6 +575,8 @@ nvc0_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
       nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_TEXTURES;
    else
       nvc0_context(pipe)->dirty_3d |= NVC0_NEW_3D_TEXTURES;
+
+   rpc_sync_end();
 }
 
 /* ============================= SHADERS =======================================
@@ -614,6 +618,8 @@ nvc0_sp_state_delete(struct pipe_context *pipe, void *hwcso)
 
    FREE((void *)prog->pipe.tokens);
    FREE(prog);
+
+   rpc_sync_end();
 }
 
 static void *
@@ -730,6 +736,8 @@ nvc0_cp_state_bind(struct pipe_context *pipe, void *hwcso)
 
     nvc0->compprog = hwcso;
     nvc0->dirty_cp |= NVC0_NEW_CP_PROGRAM;
+
+   rpc_sync_end();
 }
 
 static void
@@ -788,6 +796,8 @@ nvc0_set_constant_buffer(struct pipe_context *pipe,
       nvc0->constbuf_valid[s] &= ~(1 << i);
       nvc0->constbuf_coherent[s] &= ~(1 << i);
    }
+
+   rpc_sync_end();
 }
 
 /* =============================================================================
@@ -1133,6 +1143,8 @@ nvc0_set_compute_resources(struct pipe_context *pipe,
    nvc0_bind_surfaces_range(nvc0_context(pipe), 1, start, nr, resources);
 
    nvc0_context(pipe)->dirty_cp |= NVC0_NEW_CP_SURFACES;
+
+   rpc_sync_end();
 }
 
 static bool
@@ -1372,6 +1384,8 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
    nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_GLOBAL);
 
    nvc0->dirty_cp |= NVC0_NEW_CP_GLOBALS;
+
+   rpc_sync_end();
 }
 
 void
