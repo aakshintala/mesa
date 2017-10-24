@@ -39,7 +39,7 @@ LIBS_BASE = \
 
 new-server: server.c
 	gcc server.c -o server.out \
-		$(INCLUDES) $(LIBS_SERVER_ABYSS) $(LIBS_SERVER_CGI) $(LIBS_BASE)
+		$(INCLUDES) $(LIBS_SERVER_ABYSS) $(LIBS_SERVER_CGI) $(LIBS_BASE) -pthread -lrt
 
 server: proto
 	OCL_ICD_VENDORS=/etc/OpenCL/vendors/mesa.icd \

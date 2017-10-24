@@ -91,13 +91,18 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
                             struct pipe_fence_handle *pfence,
                             uint64_t timeout)
 {
-   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_finish\n");
+   printf("FIXME: [nouveau_screen/event] nouveau_screen_fence_finish, %d\n", timeout);
    // rpc_sync_start("nouveau_screen_fence_finish");
+   rpc_sync_start_x();
+
    boolean rt;
    if (!timeout)
       rt = nouveau_fence_signalled(nouveau_fence(pfence));
 
    rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   printf("exit fence_finish %d\n", rt);
+
+   rpc_sync_end_x();
    // rpc_sync_end("nouveau_screen_fence_finish");
    return rt;
 }

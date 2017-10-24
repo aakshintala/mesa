@@ -33,7 +33,7 @@ nvc0_screen_compute_setup(struct nvc0_screen *screen,
                           struct nouveau_pushbuf *push)
 {
    printf("RPC: [nvc0_compute] nvc0_screen_compute_setup\n");
-   rpc_sync_start("nvc0_compute");
+   rpc_sync_start("nvc0_screen_compute_setup");
 
    struct nouveau_object *chan = screen->base.channel;
    struct nouveau_device *dev = screen->base.device;
@@ -142,7 +142,7 @@ nvc0_screen_compute_setup(struct nvc0_screen *screen,
    PUSH_DATA (push, 3); /* 7 */
    PUSH_DATA (push, 1);
 
-   rpc_sync_end("nvc0_compute");
+   rpc_sync_end("nvc0_screen_compute_setup");
    return 0;
 }
 
@@ -314,7 +314,7 @@ nvc0_compute_validate_buffers(struct nvc0_context *nvc0)
 void
 nvc0_compute_validate_globals(struct nvc0_context *nvc0)
 {
-   printf("TODO: [nvc0_compute] nvc0_compute_validate_globals\n");
+   printf("RPC: [nvc0_compute] nvc0_compute_validate_globals\n");
    rpc_sync_start("nvc0_compute_validate_globals");
    unsigned i;
 

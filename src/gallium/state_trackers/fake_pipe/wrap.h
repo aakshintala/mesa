@@ -11,6 +11,9 @@ void init_rpc_service(void);
 void rpc_sync_start(const char *);
 void rpc_sync_end(const char *);
 
+void rpc_sync_start_x(void);
+void rpc_sync_end_x(void);
+
 #ifdef __cplusplus
 }
 #endif

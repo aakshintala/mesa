@@ -1372,7 +1372,7 @@ nvc0_set_global_bindings(struct pipe_context *pipe,
 
    nvc0->dirty_cp |= NVC0_NEW_CP_GLOBALS;
 
-   rpc_sync_end("nvc0_set_global_handle");
+   rpc_sync_end("nvc0_set_global_bindings");
 }
 
 void
