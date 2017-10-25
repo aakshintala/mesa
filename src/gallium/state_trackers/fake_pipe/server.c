@@ -8,6 +8,8 @@
 #include <semaphore.h>
 #include <pthread.h>
 #include <signal.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/server.h>
@@ -25,12 +27,20 @@ sem_t client_lock;
 sem_t server_lock;
 
 int rpc_count = 0;
+struct timeval tv_start, tv_end;
+float exec_time = 0;
 
 static xmlrpc_value* rpc_client_sync(xmlrpc_env* const envP,
     xmlrpc_value* const paramArrayP, void* const user_data)
 {
+    gettimeofday(&tv_start, NULL);
+
     sem_post(&client_lock);
     sem_wait(&server_lock);
+
+    gettimeofday(&tv_end, NULL);
+    exec_time += (tv_end.tv_sec * 1000.0 + tv_end.tv_usec / 1000.0)
+        - (tv_start.tv_sec * 1000.0 + tv_start.tv_usec / 1000.0);
 
     char *name;
     xmlrpc_decompose_value(envP, paramArrayP, "(s)", &name);
@@ -70,6 +80,7 @@ static xmlrpc_value* rpc_server_sync_end(xmlrpc_env* const envP,
 void cleanup(int dummy)
 {
     printf("\nRPC count: %d\n", rpc_count);
+    printf("\nServer exec time: %f\n", exec_time);
     sem_destroy(&server_lock);
     sem_destroy(&client_lock);
     exit(0);
