@@ -56,8 +56,8 @@ void rpc_sync(const char *name)
     xmlrpc_DECREF(resultP);
 
     gettimeofday(&tv_end, NULL);
-    rpc_time += (tv_end.tv_sec * 1000.0 + tv_end.tv_usec / 1000)
-        - (tv_start.tv_sec * 1000 + tv_start.tv_usec / 1000);
+    rpc_time += (tv_end.tv_sec * 1000.0 + tv_end.tv_usec / 1000.0)
+        - (tv_start.tv_sec * 1000.0 + tv_start.tv_usec / 1000.0);
 }
 
 void rpc_sync_start(void) {
