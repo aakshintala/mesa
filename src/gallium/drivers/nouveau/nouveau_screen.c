@@ -97,8 +97,8 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
    boolean rt;
    if (!timeout)
       rt = nouveau_fence_signalled(nouveau_fence(pfence));
-
-   rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   else
+      rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
 
    rpc_sync_end();
    return rt;

@@ -15,6 +15,7 @@ nvc0_resource_create(struct pipe_screen *screen,
    switch (templ->target) {
    case PIPE_BUFFER:
       ptr = nouveau_buffer_create(screen, templ);
+      break;
    default:
       ptr = nvc0_miptree_create(screen, templ);
    }
