@@ -98,8 +98,8 @@ nouveau_screen_fence_finish(struct pipe_screen *screen,
    boolean rt;
    if (!timeout)
       rt = nouveau_fence_signalled(nouveau_fence(pfence));
-
-   rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
+   else
+      rt = nouveau_fence_wait(nouveau_fence(pfence), NULL);
    printf("exit fence_finish %d\n", rt);
 
    rpc_sync_end_x();

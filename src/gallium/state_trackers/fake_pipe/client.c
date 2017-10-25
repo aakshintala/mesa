@@ -19,7 +19,7 @@ const char * const serverUrl = "http://127.0.0.1:8888/RPC2";
 const char * const sync_start = "rpc_server_sync_start";
 const char * const sync_end = "rpc_server_sync_end";
 
-static int toppest = 2;
+static int toppest = 0;
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -32,10 +32,8 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
 
 void rpc_sync_start(const char *name)
 {
-    printf("start: %s: level=%d\n", name, toppest);
     if (toppest++ > 0)
         return;
-    printf("enter_start: %s: level=%d\n", name, toppest);
     init_rpc_service();
 
     xmlrpc_value * resultP;
@@ -53,7 +51,6 @@ void rpc_sync_start(const char *name)
 
 void rpc_sync_end(const char *name)
 {
-    printf("end: %s: level=%d\n", name, toppest);
     if (toppest-- > 1)
         return;
     init_rpc_service();
