@@ -386,7 +386,9 @@ validate_list_cp[] = {
 static bool
 nvc0_state_validate_cp(struct nvc0_context *nvc0, uint32_t mask)
 {
-   printf("TODO: [nvc0_compute] nvc0_state_validate_cp\n");
+   printf("RPC: [nvc0_compute] nvc0_state_validate_cp\n");
+   rpc_sync("nvc0_state_validate_cp");
+
    bool ret;
 
    ret = nvc0_state_validate(nvc0, mask, validate_list_cp,
@@ -395,6 +397,8 @@ nvc0_state_validate_cp(struct nvc0_context *nvc0, uint32_t mask)
 
    if (unlikely(nvc0->state.flushed))
       nvc0_bufctx_fence(nvc0, nvc0->bufctx_cp, true);
+
+   rpc_sync_end();
    return ret;
 }
 
@@ -402,7 +406,9 @@ static void
 nvc0_compute_upload_input(struct nvc0_context *nvc0,
                           const struct pipe_grid_info *info)
 {
-   printf("TODO: [nvc0_compute] nvc0_compute_upload_input\n");
+   printf("RPC: [nvc0_compute] nvc0_compute_upload_input\n");
+   rpc_sync("nvc0_compute_upload_input");
+
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_screen *screen = nvc0->screen;
    struct nvc0_program *cp = nvc0->compprog;
@@ -437,12 +443,16 @@ nvc0_compute_upload_input(struct nvc0_context *nvc0,
 
    BEGIN_NVC0(push, NVC0_CP(FLUSH), 1);
    PUSH_DATA (push, NVC0_COMPUTE_FLUSH_CB);
+
+   rpc_sync_end();
 }
 
 void
 nvc0_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
 {
-   printf("TODO: [kernel] nvc0_launch_grid\n");
+   printf("RPC: [kernel] nvc0_launch_grid\n");
+   rpc_sync("nvc0_launch_grid");
+
    struct nvc0_context *nvc0 = nvc0_context(pipe);
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_program *cp = nvc0->compprog;
@@ -518,4 +528,6 @@ nvc0_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
    nouveau_bufctx_reset(nvc0->bufctx_cp, NVC0_BIND_CP_SUF);
    nvc0->dirty_cp |= NVC0_NEW_CP_SURFACES;
    nvc0->images_dirty[5] |= nvc0->images_valid[5];
+
+   rpc_sync_end();
 }

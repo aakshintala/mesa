@@ -737,7 +737,7 @@ nvc0_cp_state_bind(struct pipe_context *pipe, void *hwcso)
     nvc0->compprog = hwcso;
     nvc0->dirty_cp |= NVC0_NEW_CP_PROGRAM;
 
-   rpc_sync_end();
+    rpc_sync_end();
 }
 
 static void
