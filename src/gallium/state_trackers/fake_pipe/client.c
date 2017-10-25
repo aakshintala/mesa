@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/client.h>
@@ -18,6 +20,9 @@ static xmlrpc_env env;
 const char * const serverUrl = "http://192.168.122.249:8888/RPC2";
 const char * const methodName = "rpc_client_sync";
 static int toppest = 0;
+
+float rpc_time = 0;
+struct timeval tv_start, tv_end;
 
 static void 
 dieIfFaultOccurred (xmlrpc_env * const envP) {
@@ -36,6 +41,8 @@ void rpc_sync(const char *name)
 
     init_rpc_service();
 
+    gettimeofday(&tv_start, NULL);
+
     xmlrpc_value * resultP;
     resultP = xmlrpc_client_call(&env, serverUrl, methodName, "(s)", name);
     dieIfFaultOccurred(&env);
@@ -47,6 +54,10 @@ void rpc_sync(const char *name)
         printf("oops, something went wrong..\n");
 
     xmlrpc_DECREF(resultP);
+
+    gettimeofday(&tv_end, NULL);
+    rpc_time += (tv_end.tv_sec * 1000.0 + tv_end.tv_usec / 1000)
+        - (tv_start.tv_sec * 1000 + tv_start.tv_usec / 1000);
 }
 
 void rpc_sync_start(void) {
@@ -88,6 +99,13 @@ void hello(void)
     xmlrpc_DECREF(resultP);
 }
 
+void clean_on_exit(void)
+{
+    printf("RPC total time (include exec time): %f\n", rpc_time);
+    xmlrpc_env_clean(&env);
+    xmlrpc_client_cleanup();
+}
+
 void init_rpc_service(void)
 {
     static int initialized = 0;
@@ -103,12 +121,7 @@ void init_rpc_service(void)
     /* Create the global XML-RPC client object. */
     xmlrpc_client_init2(&env, XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION, NULL, 0);
     dieIfFaultOccurred(&env);
-}
 
-/*
-__attribute__((destructor)) void cleanup(void)
-{
-    xmlrpc_env_clean(&env);
-    xmlrpc_client_cleanup();
+    /* Cleanup on exit */
+    atexit(clean_on_exit);
 }
-*/
