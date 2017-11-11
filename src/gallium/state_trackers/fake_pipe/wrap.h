@@ -8,6 +8,9 @@ extern "C" {
 void init_rpc_service(void);
 
 /* handlers */
+void measure_start(void);
+void measure_stop(void);
+
 void rpc_sync_start(const char *);
 void rpc_sync_end(const char *);
 

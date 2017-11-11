@@ -19,15 +19,23 @@ const char * const serverUrl = "http://127.0.0.1:8888/RPC2";
 const char * const sync_start = "rpc_server_sync_start";
 const char * const sync_end = "rpc_server_sync_end";
 
-static int toppest = 0;
+static int toppest = 0; // block the execution by default
 
-static void 
+static void
 dieIfFaultOccurred (xmlrpc_env * const envP) {
     if (envP->fault_occurred) {
         fprintf(stderr, "ERROR: %s (%d)\n",
                 envP->fault_string, envP->fault_code);
         exit(1);
     }
+}
+
+void measure_start(void) {
+    toppest = 0;
+}
+
+void measure_stop(void) {
+    toppest = 1;
 }
 
 void rpc_sync_start(const char *name)
