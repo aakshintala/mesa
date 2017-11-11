@@ -33,6 +33,14 @@ dieIfFaultOccurred (xmlrpc_env * const envP) {
     }
 }
 
+void measure_start(void) {
+    toppest = 0;
+}
+
+void measure_stop(void) {
+    toppest = 1;
+}
+
 void rpc_sync(const char *name)
 {
     // only send RPCs for the toppest-level pipe functions

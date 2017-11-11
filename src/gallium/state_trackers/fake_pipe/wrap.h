@@ -10,6 +10,9 @@ void clean_on_exit(void);
 //__attribute__((destructor)) void cleanup(void);
 
 /* handlers */
+void measure_start(void);
+void measure_stop(void);
+
 void rpc_sync(const char *);
 void rpc_sync_start(void);
 void rpc_sync_end(void);
